@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kayfa Learning AI | STUFF — Admin Observability</title>
+    <!-- Update these paths when serving through FastAPI -->
+    <link rel="stylesheet" href="../static/css/aou_css.css">
+    <link rel="stylesheet" href="../static/css/tracing_css.css">
+</head>
+
+<body>
+
+    <main id="adminLoginView" class="view" aria-label="Admin login page">
+        <header class="topbar">
+            <div class="topbar-logo">
+                <div class="logo-mark" aria-hidden="true">Kayfa - كيف</div>
+                <div class="logo-text">
+                    <span class="logo-line1">Kayfa learning Platform</span>
+                    <span class="logo-line2">STUFF — Admin Area</span>
+                </div>
+            </div>
+            <div class="topbar-right">
+                <a href="aou_html.html" class="lang-toggle" style="text-decoration:none;">⬅ Back to Portal</a>
+            </div>
+        </header>
+
+        <section class="login-stage">
+            <div class="login-card" style="min-height:auto;">
+                <section class="login-form-side" style="flex:1 1 100%;">
+                    <div class="login-flag" aria-hidden="true">🔐</div>
+                    <div class="login-title">Kayfa learning Platform — STUFF</div>
+                    <h1 class="login-heading">Admin Observability</h1>
+                    <p class="login-sub">Restricted area. Authorized personnel only.</p>
+
+                    <form id="adminLoginForm" autocomplete="on">
+                        <div class="form-group">
+                            <label class="field-label" for="adminEmailInput">Email</label>
+                            <div class="input-wrap">
+                                <span class="input-icon" aria-hidden="true">✉️</span>
+                                <input type="email" id="adminEmailInput" name="email" placeholder="admin@example.com"
+                                    autocomplete="username" required>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="field-label" for="adminPasswordInput">Password</label>
+                            <div class="input-wrap">
+                                <span class="input-icon" aria-hidden="true">🔒</span>
+                                <input type="password" id="adminPasswordInput" name="password"
+                                    placeholder="Enter password" autocomplete="current-password" required>
+                                <button type="button" class="input-eye" id="toggleAdminPassword"
+                                    aria-label="Show password">👁</button>
+                            </div>
+                        </div>
+
+                        <div id="adminLoginError" class="login-error" role="alert" aria-live="polite"></div>
+
+                        <button type="submit" id="adminLoginButton" class="btn-login">
+                            <span id="adminLoginButtonText">Login</span>
+                            <span id="adminLoginSpinner" class="button-spinner" hidden>⏳</span>
+                        </button>
+                    </form>
+                </section>
+            </div>
+        </section>
+    </main>
+
+    <main id="adminDashboardView" class="view" style="display:none;">
+        <header class="dash-navbar">
+            <div class="dash-logo">
+                <div class="logo-mark small" aria-hidden="true">Kayfa - كيف</div>
+                <div class="logo-text">
+                    <span class="logo-line1">Kayfa learning Platform</span>
+                    <span class="logo-line2">STUFF — Admin Observability</span>
+                </div>
+            </div>
+
+            <div class="dash-user">
+                <a href="aou_html.html" class="logout-button" style="text-decoration:none;">⬅ Portal</a>
+                <button type="button" class="logout-button" id="adminLogoutBtn">Logout</button>
+            </div>
+        </header>
+
+        <section class="dash-content">
+            <section class="admin-kpi-grid" id="adminKpiGrid">
+                <div class="admin-kpi-card">
+                    <div class="admin-kpi-label">🔎 Traces</div>
+                    <div class="admin-kpi-value" id="kpiTraces">—</div>
+                </div>
+                <div class="admin-kpi-card">
+                    <div class="admin-kpi-label">👥 Users</div>
+                    <div class="admin-kpi-value" id="kpiUsers">—</div>
+                </div>
+                <div class="admin-kpi-card">
+                    <div class="admin-kpi-label">📞 Generations</div>
+                    <div class="admin-kpi-value" id="kpiGenerations">—</div>
+                </div>
+                <div class="admin-kpi-card">
+                    <div class="admin-kpi-label">🔢 Tokens</div>
+                    <div class="admin-kpi-value" id="kpiTokens">—</div>
+                </div>
+                <div class="admin-kpi-card">
+                    <div class="admin-kpi-label">💰 Cost</div>
+                    <div class="admin-kpi-value" id="kpiCost">—</div>
+                </div>
+            </section>
+
+            <section class="admin-filters">
+                <div class="admin-filter-item">
+                    <label class="field-label">User ID</label>
+                    <select id="filterUser" class="admin-select">
+                        <option value="All">All</option>
+                    </select>
+                </div>
+                <div class="admin-filter-item">
+                    <label class="field-label">Role</label>
+                    <select id="filterRole" class="admin-select">
+                        <option value="All">All</option>
+                    </select>
+                </div>
+                <div class="admin-filter-item admin-filter-search">
+                    <label class="field-label">Search in queries</label>
+                    <input type="text" id="filterSearch" class="admin-search-input"
+                        placeholder="grades, schedule, courses...">
+                </div>
+                <div class="admin-filter-item">
+                    <button type="button" class="btn-login" id="refreshTracesBtn" style="margin-top:22px;">🔄
+                        Refresh</button>
+                </div>
+            </section>
+
+            <div id="adminStatus" class="dashboard-status"></div>
+            <section id="adminTraceList" class="admin-trace-list"></section>
+        </section>
+    </main>
+    <!-- Update this path when serving through FastAPI -->
+    <script src="../static/js/tracing_js.js"></script>
+</body>
+
+</html>

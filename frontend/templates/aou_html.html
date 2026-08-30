@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="CampusX AI - Secure University Student Portal">
+    <title>CampusX AI | University Portal</title>
+    <!-- Update these paths when serving through FastAPI -->
+    <link rel="stylesheet" href="../static/css/aou_css.css">
+</head>
+
+<body>
+
+    <main id="loginView" class="view" aria-label="Login page">
+        <header class="topbar">
+            <div class="topbar-logo">
+                <div class="logo-mark" aria-hidden="true">Kayfa - كيف</div>
+                <div class="logo-text">
+                    <span class="logo-line1">Kayfa learning Platform</span>
+                    <span class="logo-line2"></span>
+                </div>
+            </div>
+            <div class="topbar-right">
+                <button type="button" class="lang-toggle" aria-label="Change language">🌐 EN</button>
+                <button type="button" class="help-icon" aria-label="Help">?</button>
+            </div>
+        </header>
+
+        <section class="login-stage">
+            <div class="login-card">
+                <section class="login-form-side">
+                    <div class="login-flag" aria-hidden="true">🇪🇬</div>
+                    <div class="login-title">Kayfa - كيف</div>
+                    <h1 class="login-heading">Welcome to CampusX AI</h1>
+                    <p class="login-sub">Sign in securely to your university account</p>
+
+                    <form id="loginForm" autocomplete="on">
+                        <div class="form-group">
+                            <label class="field-label" for="userIdInput">User ID</label>
+                            <div class="input-wrap">
+                                <span class="input-icon" aria-hidden="true">👤</span>
+                                <input type="text" id="userIdInput" name="user_id" placeholder="Enter your User ID"
+                                    autocomplete="username" maxlength="100" required>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="field-label" for="roleInput">Account Type</label>
+                            <div class="input-wrap">
+                                <span class="input-icon" aria-hidden="true">🎓</span>
+                                <select id="roleInput" name="role" required>
+                                    <option value="" selected disabled>Select your role</option>
+                                    <option value="Student">Student</option>
+                                    <option value="Instructor">Instructor</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="field-label" for="passwordInput">Password</label>
+                            <div class="input-wrap">
+                                <span class="input-icon" aria-hidden="true">🔒</span>
+                                <input type="password" id="passwordInput" name="password"
+                                    placeholder="Enter your password" autocomplete="current-password" minlength="8"
+                                    maxlength="200" required>
+                                <button type="button" class="input-eye" id="togglePassword"
+                                    aria-label="Show password">👁</button>
+                            </div>
+                        </div>
+
+                        <div class="forgot-row">
+                            <button type="button" id="forgotPasswordBtn">Forgot Password?</button>
+                        </div>
+
+                        <div id="loginError" class="login-error" role="alert" aria-live="polite"></div>
+
+                        <button type="submit" id="loginButton" class="btn-login">
+                            <span id="loginButtonText">Login</span>
+                            <span id="loginSpinner" class="button-spinner" hidden>⏳</span>
+                        </button>
+                    </form>
+                </section>
+
+                <aside class="login-visual-side">
+                    <div class="visual-overlay">
+                        <div class="visual-icon" aria-hidden="true"></div>
+                        <div class="visual-caption">Manage your academic life<br>with CampusX AI.</div>
+                    </div>
+                </aside>
+            </div>
+        </section>
+    </main>
+
+    <main id="dashboardView" class="view" style="display:none;">
+        <header class="dash-navbar">
+            <div class="dash-logo">
+                <div class="logo-mark small" aria-hidden="true">Kayfa - كيف</div>
+                <div class="logo-text">
+                    <span class="logo-line1">Kayfa learning Platform</span>
+                    <span class="logo-line2"></span>
+                </div>
+            </div>
+
+            <nav class="dash-tabs" aria-label="Dashboard navigation">
+                <button class="dash-tab active" data-tab="home">Home</button>
+                <button class="dash-tab" data-tab="registration">Registration</button>
+                <button class="dash-tab" data-tab="schedule">Schedule</button>
+                <button class="dash-tab" data-tab="grades">Grades</button>
+                <button class="dash-tab" data-tab="financial">Financial</button>
+                <button class="dash-tab" data-tab="other">Other Services</button>
+            </nav>
+
+            <div class="dash-user">
+                <span class="user-icon" aria-hidden="true">👤</span>
+                <div class="user-meta">
+                    <span class="user-id" id="navUserId">—</span>
+                    <span class="user-name" id="navUserName">—</span>
+                </div>
+                <span class="user-role" id="navUserRole">—</span>
+                <a href="aou_admin.html" class="logout-button"
+                    style="text-decoration:none;background:rgba(46,125,70,.25);border-color:#2E7D46;">🛠 STUFF</a>
+                <button type="button" class="logout-button" id="logoutBtn">Logout</button>
+            </div>
+        </header>
+
+        <section class="dash-content">
+            <div class="semester-bar">
+                <span>Academic Semester: <b id="currentSemester">—</b></span>
+            </div>
+
+            <section class="info-card">
+                <div class="info-left">
+                    <h2>👤 <span id="profileTitle">User Information</span></h2>
+                    <div class="info-stats">
+                        <div class="stat-item"><span class="stat-label">GPA:</span><span class="stat-value"
+                                id="statGpa">—</span></div>
+                        <div class="stat-item"><span class="stat-label">Advisor:</span><span class="stat-value"
+                                id="statAdvisor">—</span></div>
+                        <div class="stat-item"><span class="stat-label">Completed Credits:</span><span
+                                class="stat-value" id="statHours">—</span></div>
+                        <div class="stat-item"><span class="stat-label">Department:</span><span class="stat-value"
+                                id="statDepartment">—</span></div>
+                    </div>
+                </div>
+
+                <div class="info-progress">
+                    <div class="progress-ring" id="progressRing" style="--pct:0deg;">
+                        <div class="progress-inner">
+                            <span class="progress-pct" id="progressPct">—</span>
+                        </div>
+                    </div>
+                    <div class="progress-caption">Academic Plan Completion</div>
+                    <div class="progress-hours">Completed Credits: <b id="progressHours">—</b></div>
+                </div>
+
+                <div class="info-right">
+                    <div class="info-right-row"><span>User ID:</span><b id="cardUserId">—</b></div>
+                    <div class="info-right-row"><span>Name:</span><b id="cardUserName">—</b></div>
+                    <div class="info-right-row"><span>Program:</span><b id="cardProgram">—</b></div>
+                    <div class="info-right-row"><span>Role:</span><b id="cardRole">—</b></div>
+                    <div class="photo-frame" id="photoFrame" aria-label="Profile placeholder"></div>
+                </div>
+            </section>
+
+            <section class="tiles-grid" aria-label="University services">
+                <button class="tile active-tile" data-service="registration">
+                    <div class="tile-icon">📖</div>
+                    <div class="tile-label">Registration</div>
+                </button>
+                <button class="tile" data-service="schedule">
+                    <div class="tile-icon">📅</div>
+                    <div class="tile-label">Schedule</div>
+                </button>
+                <button class="tile" data-service="grades">
+                    <div class="tile-icon">🏅</div>
+                    <div class="tile-label">Grades</div>
+                </button>
+                <button class="tile" data-service="financial">
+                    <div class="tile-icon">💲</div>
+                    <div class="tile-label">Financial</div>
+                </button>
+                <button class="tile" data-service="lms">
+                    <div class="tile-icon">📘</div>
+                    <div class="tile-label">LMS</div>
+                </button>
+                <button class="tile" data-service="other">
+                    <div class="tile-icon">🔲</div>
+                    <div class="tile-label">Other Services</div>
+                </button>
+            </section>
+
+            <div id="dashboardStatus" class="dashboard-status" aria-live="polite"></div>
+        </section>
+
+        <button id="aiAvatarBtn" class="ai-avatar" title="Open CampusX AI" aria-label="Open CampusX AI assistant">
+            <span class="ai-avatar-icon" aria-hidden="true"></span>
+        </button>
+
+        <aside id="aiPanel" class="ai-panel" aria-label="CampusX AI Assistant">
+            <header class="ai-panel-header">
+                <div class="ai-panel-title"><span class="ai-dot"></span>CampusX AI Assistant</div>
+                <button id="aiCloseBtn" class="ai-close-btn" type="button" aria-label="Close AI assistant">✕</button>
+            </header>
+            <div class="ai-panel-body" id="aiMessages" aria-live="polite"></div>
+            <div class="ai-panel-input">
+                <input type="text" id="aiInputBox" placeholder="Ask CampusX AI..." maxlength="4000" autocomplete="off">
+                <button id="aiSendBtn" type="button" aria-label="Send message">➤</button>
+            </div>
+        </aside>
+    </main>
+    <!-- Update this path when serving through FastAPI -->
+    <script src="../static/js/aou_js.js"></script>
+</body>
+
+</html>
