@@ -1,218 +1,298 @@
-const ADMIN_API_BASE = "";
+const API_BASE = "";
 
+// DOM Elements
 const adminLoginView = document.getElementById("adminLoginView");
 const adminDashboardView = document.getElementById("adminDashboardView");
 const adminLoginForm = document.getElementById("adminLoginForm");
 const adminLoginError = document.getElementById("adminLoginError");
+const toggleAdminPassword = document.getElementById("toggleAdminPassword");
+const adminPasswordInput = document.getElementById("adminPasswordInput");
 const adminLoginButton = document.getElementById("adminLoginButton");
 const adminLoginButtonText = document.getElementById("adminLoginButtonText");
 const adminLoginSpinner = document.getElementById("adminLoginSpinner");
-const toggleAdminPassword = document.getElementById("toggleAdminPassword");
-const adminPasswordInput = document.getElementById("adminPasswordInput");
-const adminStatus = document.getElementById("adminStatus");
-const adminTraceList = document.getElementById("adminTraceList");
+const adminLogoutBtn = document.getElementById("adminLogoutBtn");
+
 const filterUser = document.getElementById("filterUser");
 const filterRole = document.getElementById("filterRole");
 const filterSearch = document.getElementById("filterSearch");
 const refreshTracesBtn = document.getElementById("refreshTracesBtn");
-const adminLogoutBtn = document.getElementById("adminLogoutBtn");
 
 let allTraces = [];
 
-if (toggleAdminPassword) {
+// Password Visibility Toggle
+if (toggleAdminPassword && adminPasswordInput) {
     toggleAdminPassword.addEventListener("click", () => {
-        adminPasswordInput.type = adminPasswordInput.type === "password" ? "text" : "password";
+        if (adminPasswordInput.type === "password") {
+            adminPasswordInput.type = "text";
+            toggleAdminPassword.setAttribute("aria-label", "Hide password");
+        } else {
+            adminPasswordInput.type = "password";
+            toggleAdminPassword.setAttribute("aria-label", "Show password");
+        }
     });
 }
 
+// Admin Form Submission Login
 if (adminLoginForm) {
     adminLoginForm.addEventListener("submit", async (e) => {
         e.preventDefault();
-        adminLoginError.textContent = "";
+        if (adminLoginError) adminLoginError.textContent = "";
 
         const email = document.getElementById("adminEmailInput").value.trim();
-        const password = adminPasswordInput.value;
+        const password = document.getElementById("adminPasswordInput").value;
 
-        if (!email || !password) {
-            adminLoginError.textContent = "من فضلك أدخل الإيميل وكلمة المرور.";
-            return;
-        }
-
-        adminLoginButton.disabled = true;
-        adminLoginButtonText.textContent = "Logging in...";
-        adminLoginSpinner.hidden = false;
+        if (adminLoginButton) adminLoginButton.disabled = true;
+        if (adminLoginButtonText) adminLoginButtonText.textContent = "Logging in...";
+        if (adminLoginSpinner) adminLoginSpinner.hidden = false;
 
         try {
-            const res = await fetch(`${ADMIN_API_BASE}/api/admin/login`, {
+            const res = await fetch(`${API_BASE}/api/admin/login`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ email, password }),
+                body: JSON.stringify({ email: email, password: password })
             });
             const data = await res.json();
 
             if (!res.ok) {
-                adminLoginError.textContent = data.detail || "Invalid credentials.";
+                if (adminLoginError) adminLoginError.textContent = data.detail || "Invalid admin credentials.";
                 return;
             }
 
-            localStorage.setItem("admin_token", data.access_token);
-            adminLoginView.style.display = "none";
-            adminDashboardView.style.display = "block";
-            loadDashboard();
+            localStorage.setItem("admin_access_token", data.access_token);
+            showDashboard();
         } catch (err) {
-            adminLoginError.textContent = "⚠️ تعذر الاتصال بالسيرفر. تأكد أن aou_api.py شغال على port 8000.";
+            if (adminLoginError) adminLoginError.textContent = "⚠️ Connection to server failed.";
         } finally {
-            adminLoginButton.disabled = false;
-            adminLoginButtonText.textContent = "Login";
-            adminLoginSpinner.hidden = true;
+            if (adminLoginButton) adminLoginButton.disabled = false;
+            if (adminLoginButtonText) adminLoginButtonText.textContent = "Login";
+            if (adminLoginSpinner) adminLoginSpinner.hidden = true;
         }
     });
 }
 
-async function loadDashboard() {
-    const token = localStorage.getItem("admin_token");
-    if (!token) {
-        adminDashboardView.style.display = "none";
-        adminLoginView.style.display = "block";
-        return;
-    }
+// Show Dashboard & Fetch Data
+async function showDashboard() {
+    if (adminLoginView) adminLoginView.style.display = "none";
+    if (adminDashboardView) adminDashboardView.style.display = "block";
+    await fetchDashboardData();
+}
 
-    adminStatus.textContent = "🔄 جاري تحميل البيانات من Langfuse...";
+// Fetch Traces and KPI data from backend
+async function fetchDashboardData() {
+    const token = localStorage.getItem("admin_access_token");
+    const adminStatus = document.getElementById("adminStatus");
+    if (!token) return;
+
+    if (adminStatus) adminStatus.innerHTML = "<b>Loading dashboard data...</b>";
 
     try {
-        const res = await fetch(`${ADMIN_API_BASE}/api/admin/dashboard`, {
-            method: "GET",
-            headers: { "Authorization": `Bearer ${token}` },
-        });
-        const data = await res.json();
-
-        if (!res.ok) {
-            if (res.status === 401 || res.status === 403) {
-                localStorage.removeItem("admin_token");
-                adminDashboardView.style.display = "none";
-                adminLoginView.style.display = "block";
-                return;
+        const res = await fetch(`${API_BASE}/api/admin/dashboard`, {
+            headers: {
+                "Authorization": `Bearer ${token}`
             }
-            adminStatus.textContent = "❌ " + (data.detail || "فشل تحميل البيانات.");
+        });
+
+        if (res.status === 401 || res.status === 403) {
+            logoutAdmin();
             return;
         }
 
-        allTraces = data.traces || [];
-        renderKpi(data.kpi || {});
-        populateFilters(allTraces);
-        applyFiltersAndRender();
-        adminStatus.textContent = `✅ آخر تحديث: ${new Date().toLocaleTimeString()}`;
+        const data = await res.json();
+        if (data.status === "success") {
+            if (adminStatus) adminStatus.innerHTML = "";
+            allTraces = data.traces || [];
+            updateKPIs(data.kpi, allTraces.length);
+            populateFilters(allTraces);
+            renderTraceList(allTraces);
+        } else {
+            if (adminStatus) adminStatus.innerHTML = `<span style="color:#d9534f;">⚠️ Error: ${data.error || 'Failed to fetch data'}</span>`;
+        }
     } catch (err) {
-        console.error("ADMIN DASHBOARD ERROR:", err);
-        adminStatus.textContent = "⚠️ تعذر الاتصال بالسيرفر.";
+        if (adminStatus) adminStatus.innerHTML = `<span style="color:#d9534f;">⚠️ Connection error.</span>`;
     }
 }
 
-function renderKpi(kpi) {
-    document.getElementById("kpiTraces").textContent = allTraces.length;
-    document.getElementById("kpiUsers").textContent = (kpi.unique_users || []).length;
-    document.getElementById("kpiGenerations").textContent = kpi.calls_count ?? "—";
-    document.getElementById("kpiTokens").textContent = (kpi.total_tokens ?? 0).toLocaleString();
-    document.getElementById("kpiCost").textContent = "$" + (kpi.total_cost ?? 0).toFixed(6);
+// KPI Grid Rendering
+function updateKPIs(kpi, tracesCount) {
+    const kpiTraces = document.getElementById("kpiTraces");
+    const kpiUsers = document.getElementById("kpiUsers");
+    const kpiGenerations = document.getElementById("kpiGenerations");
+    const kpiTokens = document.getElementById("kpiTokens");
+    const kpiCost = document.getElementById("kpiCost");
+
+    if (kpiTraces) kpiTraces.textContent = tracesCount;
+    if (kpiUsers) kpiUsers.textContent = kpi.unique_users ? kpi.unique_users.length : 0;
+    if (kpiGenerations) kpiGenerations.textContent = kpi.calls_count || 0;
+    if (kpiTokens) kpiTokens.textContent = kpi.total_tokens || 0;
+    
+    // Formats cost value
+    let totalCostVal = parseFloat(kpi.total_cost || 0);
+    if (kpiCost) kpiCost.textContent = `$${totalCostVal.toFixed(6)}`;
 }
 
+// Populate Filters user_id and user_role list dynamically
 function populateFilters(traces) {
-    const users = [...new Set(traces.map(t => t.user_id).filter(Boolean))].sort();
-    const roles = [...new Set(traces.map(t => t.user_role).filter(Boolean))].sort();
+    if (filterUser) {
+        const currentUserSelected = filterUser.value || "All";
+        filterUser.innerHTML = '<option value="All">All</option>';
+        const users = [...new Set(traces.map(t => t.user_id).filter(Boolean))].sort();
+        users.forEach(u => {
+            const opt = document.createElement("option");
+            opt.value = u;
+            opt.textContent = u;
+            filterUser.appendChild(opt);
+        });
+        filterUser.value = users.includes(currentUserSelected) ? currentUserSelected : "All";
+    }
 
-    filterUser.innerHTML = '<option value="All">All</option>' +
-        users.map(u => `<option value="${u}">${u}</option>`).join("");
-
-    filterRole.innerHTML = '<option value="All">All</option>' +
-        roles.map(r => `<option value="${r}">${r}</option>`).join("");
+    if (filterRole) {
+        const currentRoleSelected = filterRole.value || "All";
+        filterRole.innerHTML = '<option value="All">All</option>';
+        const roles = [...new Set(traces.map(t => t.user_role).filter(Boolean))].sort();
+        roles.forEach(r => {
+            const opt = document.createElement("option");
+            opt.value = r;
+            opt.textContent = r;
+            filterRole.appendChild(opt);
+        });
+        filterRole.value = roles.includes(currentRoleSelected) ? currentRoleSelected : "All";
+    }
 }
 
-function applyFiltersAndRender() {
-    const userVal = filterUser.value;
-    const roleVal = filterRole.value;
-    const searchVal = filterSearch.value.trim().toLowerCase();
+// Trace List Generation Layout
+function renderTraceList(traces) {
+    const listContainer = document.getElementById("adminTraceList");
+    if (!listContainer) return;
+
+    listContainer.innerHTML = "";
+
+    if (traces.length === 0) {
+        listContainer.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px;text-align:center;color:var(--aou-muted);">No traces match the current filter.</div>';
+        return;
+    }
+
+    traces.forEach(t => {
+        const card = document.createElement("div");
+        card.className = "admin-trace-card";
+
+        card.addEventListener("click", (e) => {
+            if (e.target.tagName.toLowerCase() === "a") return;
+            card.classList.toggle("open");
+        });
+
+        let timeStr = "";
+        try {
+            if (t.timestamp) {
+                const date = new Date(t.timestamp);
+                timeStr = date.toLocaleString();
+            }
+        } catch (err) {
+            timeStr = t.timestamp || "";
+        }
+
+        const uSent = t.user_sentiment || { label: "Neutral", confidence: 1.0 };
+        const aSent = t.assistant_sentiment || { label: "Neutral", confidence: 1.0 };
+
+        const uSentEmoji = uSent.label === "Positive" ? "🟢" : (uSent.label === "Negative" ? "🔴" : "⚪");
+        const aSentEmoji = aSent.label === "Positive" ? "🟢" : (aSent.label === "Negative" ? "🔴" : "⚪");
+
+        card.innerHTML = `
+            <div class="admin-trace-top">
+                <div class="admin-trace-query">${escapeHtml(t.query || "Empty query")}</div>
+                <div class="admin-trace-meta">
+                    <span class="admin-trace-badge">User: ${escapeHtml(t.user_id)}</span>
+                    <span class="admin-trace-badge">Role: ${escapeHtml(t.user_role)}</span>
+                    <span class="admin-trace-badge">${timeStr}</span>
+                </div>
+            </div>
+            
+            <div class="admin-trace-details">
+                <div class="admin-trace-section-label">User Query Sentiment</div>
+                <div class="admin-sentiment-row" style="margin-bottom:12px;">
+                    <span class="admin-sentiment-chip">${uSentEmoji} User: ${uSent.label} (${Math.round((uSent.confidence || 0) * 100)}%)</span>
+                    <span class="admin-sentiment-chip">${aSentEmoji} Assistant: ${aSent.label} (${Math.round((aSent.confidence || 0) * 100)}%)</span>
+                </div>
+                
+                <div class="admin-trace-section-label">Active Agents</div>
+                <div style="margin-bottom: 12px;">
+                    ${t.agents && t.agents.length > 0
+                        ? t.agents.map(a => `<span class="admin-trace-badge" style="margin-right:6px;display:inline-block;margin-bottom:4px;">${escapeHtml(a)}</span>`).join("")
+                        : '<span class="admin-trace-badge">None</span>'}
+                </div>
+                
+                ${t.routing_reason ? `
+                    <div class="admin-trace-section-label">Routing Reason</div>
+                    <div class="admin-trace-box" style="margin-bottom:12px;">${escapeHtml(t.routing_reason)}</div>
+                ` : ""}
+                
+                <div class="admin-trace-section-label">AI Response</div>
+                <div class="admin-trace-box" style="margin-bottom:12px;">${escapeHtml(t.response || "No response generated")}</div>
+                
+                <div style="margin-top:14px;text-align:right;">
+                    <a href="${t.url}" target="_blank" class="admin-trace-link" style="color:var(--aou-blue);text-decoration:none;">🔍 View Trace in Langfuse ↗</a>
+                </div>
+            </div>
+        `;
+
+        listContainer.appendChild(card);
+    });
+}
+
+// Client-side Filters logic
+function applyFilters() {
+    const userVal = filterUser ? filterUser.value : "All";
+    const roleVal = filterRole ? filterRole.value : "All";
+    const searchVal = filterSearch ? filterSearch.value.trim().toLowerCase() : "";
 
     const filtered = allTraces.filter(t => {
-        if (userVal !== "All" && t.user_id !== userVal) return false;
-        if (roleVal !== "All" && t.user_role !== roleVal) return false;
-        if (searchVal && !(t.query || "").toLowerCase().includes(searchVal)) return false;
-        return true;
+        const matchUser = (userVal === "All" || t.user_id === userVal);
+        const matchRole = (roleVal === "All" || t.user_role === roleVal);
+        const matchSearch = (!searchVal || 
+            (t.query && t.query.toLowerCase().includes(searchVal)) || 
+            (t.response && t.response.toLowerCase().includes(searchVal)) ||
+            (t.routing_reason && t.routing_reason.toLowerCase().includes(searchVal))
+        );
+        return matchUser && matchRole && matchSearch;
     });
 
     renderTraceList(filtered);
 }
 
-[filterUser, filterRole].forEach(el => el.addEventListener("change", applyFiltersAndRender));
-filterSearch.addEventListener("input", applyFiltersAndRender);
-refreshTracesBtn.addEventListener("click", loadDashboard);
+// Register Filter listeners
+if (filterUser) filterUser.addEventListener("change", applyFilters);
+if (filterRole) filterRole.addEventListener("change", applyFilters);
+if (filterSearch) filterSearch.addEventListener("input", applyFilters);
+if (refreshTracesBtn) refreshTracesBtn.addEventListener("click", fetchDashboardData);
 
-function sentimentChip(sentiment, who) {
-    if (!sentiment) return `<span class="admin-sentiment-chip">${who}: —</span>`;
-    const label = sentiment.label || "Unknown";
-    const confidence = Math.round((sentiment.confidence || 0) * 100);
-    let emoji = "⚪";
-    if (label.toLowerCase() === "positive") emoji = "🟢";
-    else if (label.toLowerCase() === "negative") emoji = "🔴";
-    return `<span class="admin-sentiment-chip">${who}: ${emoji} ${label} (${confidence}%)</span>`;
+// Safety escape HTML string
+function escapeHtml(text) {
+    if (!text) return "";
+    return text.toString()
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
 }
 
-function renderTraceList(traces) {
-    if (!traces.length) {
-        adminTraceList.innerHTML = '<div class="dashboard-status">لا توجد traces مطابقة للفلاتر الحالية.</div>';
-        return;
-    }
-
-    adminTraceList.innerHTML = traces.map((t, idx) => {
-        const query = (t.query || "(no query)").replace(/</g, "&lt;");
-        const response = (t.response || "(no response)").replace(/</g, "&lt;");
-        const agents = (t.agents || []).join(", ") || "—";
-
-        return `
-        <div class="admin-trace-card" data-idx="${idx}">
-            <div class="admin-trace-top">
-                <div class="admin-trace-query">${query.slice(0, 100)}</div>
-                <div class="admin-trace-meta">
-                    <span class="admin-trace-badge">👤 ${t.user_id}</span>
-                    <span class="admin-trace-badge">🎭 ${t.user_role}</span>
-                    <span class="admin-trace-badge">${t.timestamp || ""}</span>
-                </div>
-            </div>
-            <div class="admin-trace-details">
-                <div class="admin-trace-section-label">📥 Query</div>
-                <div class="admin-trace-box">${query}</div>
-                <div class="admin-trace-section-label">📤 Response</div>
-                <div class="admin-trace-box">${response}</div>
-                <div class="admin-trace-section-label">🔀 Routing</div>
-                <div class="admin-trace-box">Agents: ${agents}<br>Reason: ${t.routing_reason || "—"}</div>
-                <div class="admin-trace-section-label">❤️ Sentiment</div>
-                <div class="admin-sentiment-row">
-                    ${sentimentChip(t.user_sentiment, "User")}
-                    ${sentimentChip(t.assistant_sentiment, "Assistant")}
-                </div>
-                ${t.url ? `<div style="margin-top:10px;"><a class="admin-trace-link" href="${t.url}" target="_blank" rel="noopener">🔗 Open in Langfuse</a></div>` : ""}
-            </div>
-        </div>`;
-    }).join("");
-
-    document.querySelectorAll(".admin-trace-card").forEach(card => {
-        card.addEventListener("click", () => card.classList.toggle("open"));
-    });
+// Admin logout functionality
+function logoutAdmin() {
+    localStorage.removeItem("admin_access_token");
+    if (adminDashboardView) adminDashboardView.style.display = "none";
+    if (adminLoginView) adminLoginView.style.display = "block";
+    if (adminLoginForm) adminLoginForm.reset();
+    if (adminLoginError) adminLoginError.textContent = "";
 }
 
 if (adminLogoutBtn) {
-    adminLogoutBtn.addEventListener("click", () => {
-        localStorage.removeItem("admin_token");
-        adminDashboardView.style.display = "none";
-        adminLoginView.style.display = "block";
-        adminLoginForm.reset();
-    });
+    adminLogoutBtn.addEventListener("click", logoutAdmin);
 }
 
-(function restoreAdminSession() {
-    const token = localStorage.getItem("admin_token");
-    if (token) {
-        adminLoginView.style.display = "none";
-        adminDashboardView.style.display = "block";
-        loadDashboard();
-    }
-})();
+// Session Restore
+async function restoreAdminSession() {
+    const token = localStorage.getItem("admin_access_token");
+    if (!token) return;
+    showDashboard();
+}
+
+restoreAdminSession();
