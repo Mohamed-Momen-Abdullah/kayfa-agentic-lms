@@ -317,7 +317,7 @@ async function toggleVoiceRecording() {
 
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
+        const mimeType = MediaRecorder.isTypeSupported("audio/wav;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
         mediaRecorder = new MediaRecorder(stream, { mimeType });
         recordedChunks = [];
 
