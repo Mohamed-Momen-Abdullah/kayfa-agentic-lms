@@ -4,33 +4,28 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kayfa Learning AI | STUFF — Admin Observability</title>
-    <!-- Update these paths when serving through FastAPI -->
+    <title>Kayfa STUFF | Admin Observability</title>
     <link rel="stylesheet" href="../static/css/aou_css.css">
     <link rel="stylesheet" href="../static/css/tracing_css.css">
+    <style>
+        /* Prevent flash of login/dashboard before JS determines auth state */
+        body.auth-pending { visibility: hidden; }
+    </style>
 </head>
 
-<body>
+<body class="auth-pending">
 
-    <main id="adminLoginView" class="view" aria-label="Admin login page">
-        <header class="topbar">
-            <div class="topbar-logo">
-                <div class="logo-mark" aria-hidden="true">Kayfa - كيف</div>
-                <div class="logo-text">
-                    <span class="logo-line1">Kayfa learning Platform</span>
-                    <span class="logo-line2">STUFF — Admin Area</span>
-                </div>
-            </div>
-            <div class="topbar-right">
-                <a href="aou_html.html" class="lang-toggle" style="text-decoration:none;">⬅ Back to Portal</a>
-            </div>
-        </header>
-
+    <main id="adminLoginView" class="view" style="display:none;" aria-label="Admin login page">
         <section class="login-stage">
             <div class="login-card" style="min-height:auto;">
                 <section class="login-form-side" style="flex:1 1 100%;">
-                    <div class="login-flag" aria-hidden="true">🔐</div>
-                    <div class="login-title">Kayfa learning Platform — STUFF</div>
+
+                    <!-- Branding: Blue Logo -->
+                    <div style="text-align: center; margin-bottom: 24px;">
+                        <img src="../static/kayfa_logo_Blue.png" alt="Kayfa Logo"
+                            style="height: 60px; object-fit: contain;">
+                    </div>
+
                     <h1 class="login-heading">Admin Observability</h1>
                     <p class="login-sub">Restricted area. Authorized personnel only.</p>
 
@@ -39,7 +34,7 @@
                             <label class="field-label" for="adminEmailInput">Email</label>
                             <div class="input-wrap">
                                 <span class="input-icon" aria-hidden="true">✉️</span>
-                                <input type="email" id="adminEmailInput" name="email" placeholder="admin@example.com"
+                                <input type="email" id="adminEmailInput" name="email" placeholder="admin@kayfa.com"
                                     autocomplete="username" required>
                             </div>
                         </div>
@@ -69,12 +64,13 @@
 
     <main id="adminDashboardView" class="view" style="display:none;">
         <header class="dash-navbar">
+
+            <!-- Branding: White Logo on Dark Navbar -->
             <div class="dash-logo">
-                <div class="logo-mark small" aria-hidden="true">Kayfa - كيف</div>
-                <div class="logo-text">
-                    <span class="logo-line1">Kayfa learning Platform</span>
-                    <span class="logo-line2">STUFF — Admin Observability</span>
-                </div>
+                <img src="../static/kayfa_logo_white.png" alt="Kayfa Logo" style="height: 35px; object-fit: contain;">
+                <span
+                    style="font-weight: bold; font-size: 18px; border-left: 2px solid rgba(255,255,255,0.3); padding-left: 10px; margin-left: 10px;">STUFF
+                    — Admin Observability</span>
             </div>
 
             <div class="dash-user">
@@ -122,8 +118,7 @@
                 </div>
                 <div class="admin-filter-item admin-filter-search">
                     <label class="field-label">Search in queries</label>
-                    <input type="text" id="filterSearch" class="admin-search-input"
-                        placeholder="grades, schedule, courses...">
+                    <input type="text" id="filterSearch" class="admin-search-input" placeholder="Search logs...">
                 </div>
                 <div class="admin-filter-item">
                     <button type="button" class="btn-login" id="refreshTracesBtn" style="margin-top:22px;">🔄
@@ -135,7 +130,7 @@
             <section id="adminTraceList" class="admin-trace-list"></section>
         </section>
     </main>
-    <!-- Update this path when serving through FastAPI -->
+
     <script src="../static/js/tracing_js.js"></script>
 </body>
 

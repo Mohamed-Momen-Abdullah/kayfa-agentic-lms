@@ -74,6 +74,7 @@ if (adminLoginForm) {
 async function showDashboard() {
     if (adminLoginView) adminLoginView.style.display = "none";
     if (adminDashboardView) adminDashboardView.style.display = "block";
+    document.body.classList.remove("auth-pending"); // Reveal page
     await fetchDashboardData();
 }
 
@@ -280,6 +281,7 @@ function logoutAdmin() {
     localStorage.removeItem("admin_access_token");
     if (adminDashboardView) adminDashboardView.style.display = "none";
     if (adminLoginView) adminLoginView.style.display = "block";
+    document.body.classList.remove("auth-pending"); // Reveal login form
     if (adminLoginForm) adminLoginForm.reset();
     if (adminLoginError) adminLoginError.textContent = "";
 }
@@ -291,7 +293,12 @@ if (adminLogoutBtn) {
 // Session Restore
 async function restoreAdminSession() {
     const token = localStorage.getItem("admin_access_token");
-    if (!token) return;
+    if (!token) {
+        // No session — show login form and reveal the page
+        if (adminLoginView) adminLoginView.style.display = "";
+        document.body.classList.remove("auth-pending");
+        return;
+    }
     showDashboard();
 }
 
