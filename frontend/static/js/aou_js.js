@@ -134,6 +134,11 @@ const aiCloseBtn = document.getElementById("aiCloseBtn");
 const aiMessages = document.getElementById("aiMessages");
 const aiInputBox = document.getElementById("aiInputBox");
 const aiSendBtn = document.getElementById("aiSendBtn");
+const aiVoiceBtn = document.getElementById("aiVoiceBtn");
+
+let mediaRecorder = null;
+let recordedChunks = [];
+let isRecording = false;
 
 if (aiAvatarBtn) {
     aiAvatarBtn.addEventListener("click", () => {
@@ -245,6 +250,105 @@ if (aiInputBox) {
         }
     });
 }
+
+async function sendAudioToAI(blob) {
+    const token = localStorage.getItem("access_token");
+    if (!token) {
+        appendMessage("assistant", "⚠️ انتهت جلسة الدخول. من فضلك سجل الدخول مرة أخرى.");
+        return;
+    }
+
+    const typingEl = appendMessage("typing", "يستمع ويفسر الصوت...");
+    typingEl.classList.add("typing");
+
+    try {
+        const formData = new FormData();
+        formData.append("file", blob, "voice-recording.webm");
+
+        const res = await fetch(`${API_BASE}/api/chat/audio`, {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${token}`
+            },
+            body: formData
+        });
+
+        const data = await res.json();
+        typingEl.remove();
+
+        if (!res.ok) {
+            if (res.status === 401) {
+                localStorage.removeItem("access_token");
+                localStorage.removeItem("current_user");
+                appendMessage("assistant", "⚠️ انتهت جلسة الدخول. سجل الدخول مرة أخرى.");
+                return;
+            }
+            appendMessage("assistant", data.detail || "تعذر معالجة الصوت.");
+            return;
+        }
+
+        appendMessage("assistant", data.response || "معلش، حصل خطأ في الرد.", data.sentiment || null);
+        chatHistory.push({ role: "user", content: "[audio_message]" });
+        chatHistory.push({ role: "assistant", content: data.response || "" });
+    } catch (err) {
+        if (typingEl && typingEl.parentNode) typingEl.remove();
+        appendMessage("assistant", "⚠️ تعذر إرسال الصوت إلى الخادم. تأكد أن الـ API شغال.");
+    }
+}
+
+async function toggleVoiceRecording() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        appendMessage("assistant", "⚠️ المتصفح الحالي لا يدعم تسجيل الصوت.");
+        return;
+    }
+
+    if (isRecording) {
+        if (mediaRecorder && mediaRecorder.state !== "inactive") {
+            mediaRecorder.stop();
+        }
+        isRecording = false;
+        if (aiVoiceBtn) {
+            aiVoiceBtn.classList.remove("is-recording");
+            aiVoiceBtn.textContent = "🎙️";
+            aiVoiceBtn.setAttribute("aria-label", "Record voice");
+        }
+        return;
+    }
+
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
+        mediaRecorder = new MediaRecorder(stream, { mimeType });
+        recordedChunks = [];
+
+        mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) recordedChunks.push(event.data);
+        };
+
+        mediaRecorder.onstop = async () => {
+            const audioBlob = new Blob(recordedChunks, { type: mimeType });
+            stream.getTracks().forEach((track) => track.stop());
+            if (audioBlob.size > 0) {
+                await sendAudioToAI(audioBlob);
+            }
+        };
+
+        mediaRecorder.start();
+        isRecording = true;
+        if (aiVoiceBtn) {
+            aiVoiceBtn.classList.add("is-recording");
+            aiVoiceBtn.textContent = "■";
+            aiVoiceBtn.setAttribute("aria-label", "Stop recording");
+        }
+
+        appendMessage("assistant", "🎙️ جارٍ تسجيل صوتك... اضغط مرة أخرى للإيقاف والإرسال.");
+    } catch (err) {
+        console.error("Microphone access error:", err);
+        appendMessage("assistant", "⚠️ تعذر الوصول إلى الميكروفون. تأكد من السماح بالإذن.");
+    }
+}
+
+if (aiVoiceBtn) aiVoiceBtn.addEventListener("click", toggleVoiceRecording);
 
 const logoutBtn = document.getElementById("logoutBtn");
 if (logoutBtn) {

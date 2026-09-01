@@ -2,7 +2,7 @@ import os
 import sqlite3
 import pandas as pd
 from typing import Optional, List
-from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi import FastAPI, HTTPException, Depends, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -16,6 +16,7 @@ from app.core.security import (
 from app.data.connector import USER_INDEX, DB_PATH
 from app.agents.supervisor import MCPClient
 from app.observability.tracing import _fetch_langfuse_dashboard_data
+from app.services.speech import transcribe_audio_bytes
 
 
 app = FastAPI(title="Kayfa Agentic LMS API", version="2.0.0")
@@ -107,6 +108,36 @@ async def chat(req: ChatRequest, current_user=Depends(get_current_user)):
         user_id=user_id,
         user_role=user_role,
         history=clean_history
+    )
+
+@app.post("/api/chat/audio")
+async def chat_audio(
+    file: UploadFile = File(...),
+    current_user=Depends(get_current_user)
+):
+    user_id = current_user["user_id"]
+    user_role = current_user["role"]
+
+    if not file or not file.filename:
+        raise HTTPException(status_code=400, detail="Audio file is required.")
+
+    audio_bytes = await file.read()
+    if not audio_bytes:
+        raise HTTPException(status_code=400, detail="Uploaded audio is empty.")
+
+    try:
+        transcript = transcribe_audio_bytes(audio_bytes, sample_rate=16000)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Audio transcription failed: {exc}") from exc
+
+    if not transcript.strip():
+        raise HTTPException(status_code=400, detail="No text was recognized from the audio.")
+
+    return await client.process_query_for_api(
+        query=transcript.strip(),
+        user_id=user_id,
+        user_role=user_role,
+        history=[]
     )
 
 # Direct Academic Data Endpoints for UI Tabs
