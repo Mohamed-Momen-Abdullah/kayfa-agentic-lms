@@ -16,7 +16,8 @@ __pycache__/
 *.egg-info/
 dist/
 build/
-
+*.aac
+*.wav
 # Database & Storage
 *.db
 *.sqlite3
