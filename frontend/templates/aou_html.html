@@ -4,32 +4,63 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Kayfa Agentic LMS">
-    <title>Kayfa | Agentic LMS</title>
+    <meta name="description" content="Kayfa AI — Secure University Student Portal">
+    <title>Kayfa AI | University Portal</title>
+    <!-- Apply saved/preferred theme before first paint to avoid a flash -->
+    <script>
+        (function () {
+            try {
+                var t = localStorage.getItem("kayfa-theme");
+                if (!t) { t = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"; }
+                document.documentElement.setAttribute("data-theme", t);
+            } catch (e) { }
+        })();
+    </script>
+    <!-- Update these paths when serving through FastAPI -->
+    <link rel="icon" type="image/png" href="../static/images/kayfa_icon_blue.png">
     <link rel="stylesheet" href="../static/css/aou_css.css">
 </head>
 
 <body>
 
-    <!-- LOGIN PAGE -->
     <main id="loginView" class="view" aria-label="Login page">
+        <header class="topbar">
+            <div class="topbar-logo">
+                <div class="brand-logo" aria-hidden="true">
+                    <img class="logo-img logo-light" src="../static/images/kayfa_wordmark_blue.png" alt="">
+                    <img class="logo-img logo-dark" src="../static/images/kayfa_wordmark_white.png" alt="">
+                </div>
+                <div class="logo-text">
+                    <span class="logo-line1">Kayfa Learning Platform</span>
+                    <span class="logo-line2">Agentic university portal</span>
+                </div>
+            </div>
+            <div class="topbar-right">
+                <button type="button" class="theme-toggle" id="themeToggle" aria-label="Switch to dark mode">
+                    <span class="theme-toggle-icon sun">☀️</span>
+                    <span class="theme-toggle-icon moon">🌙</span>
+                    <span class="theme-toggle-thumb"></span>
+                </button>
+                <button type="button" class="lang-toggle" aria-label="Change language">🌐 EN</button>
+                <button type="button" class="help-icon" aria-label="Help">?</button>
+            </div>
+        </header>
+
         <section class="login-stage">
             <div class="login-card">
                 <section class="login-form-side">
-                    <div style="text-align: center; margin-bottom: 24px;">
-                        <img src="../static/kayfa_logo_Blue.png" alt="Kayfa Logo"
-                            style="height: 60px; object-fit: contain;">
-                    </div>
-                    <h1 class="login-heading">Welcome to Kayfa LMS</h1>
-                    <p class="login-sub">Sign in to interact with your AI Agent</p>
+                    <div class="login-flag" aria-hidden="true">🇪🇬</div>
+                    <div class="login-title">Kayfa — كيف</div>
+                    <h1 class="login-heading">Welcome back</h1>
+                    <p class="login-sub">Sign in with your student or instructor account</p>
 
                     <form id="loginForm" autocomplete="on">
                         <div class="form-group">
-                            <label class="field-label" for="userIdInput">Email / User ID</label>
+                            <label class="field-label" for="userIdInput">User ID</label>
                             <div class="input-wrap">
                                 <span class="input-icon" aria-hidden="true">👤</span>
-                                <input type="text" id="userIdInput" name="user_id"
-                                    placeholder="Enter your ID or Admin Email" required>
+                                <input type="text" id="userIdInput" name="user_id" placeholder="Enter your User ID"
+                                    autocomplete="username" maxlength="100" required>
                             </div>
                         </div>
 
@@ -41,7 +72,6 @@
                                     <option value="" selected disabled>Select your role</option>
                                     <option value="Student">Student</option>
                                     <option value="Instructor">Instructor</option>
-                                    <option value="Admin">Admin</option>
                                 </select>
                             </div>
                         </div>
@@ -51,48 +81,192 @@
                             <div class="input-wrap">
                                 <span class="input-icon" aria-hidden="true">🔒</span>
                                 <input type="password" id="passwordInput" name="password"
-                                    placeholder="Enter your password" required>
+                                    placeholder="Enter your password" autocomplete="current-password" minlength="8"
+                                    maxlength="200" required>
+                                <button type="button" class="input-eye" id="togglePassword"
+                                    aria-label="Show password">👁</button>
                             </div>
                         </div>
 
-                        <div id="loginError" class="login-error" role="alert"></div>
+                        <div class="forgot-row">
+                            <button type="button" id="forgotPasswordBtn">Forgot Password?</button>
+                        </div>
+
+                        <div id="loginError" class="login-error" role="alert" aria-live="polite"></div>
 
                         <button type="submit" id="loginButton" class="btn-login">
-                            <span id="loginButtonText">Login</span>
+                            <span id="loginButtonText">Sign in</span>
+                            <span id="loginSpinner" class="button-spinner" hidden>⏳</span>
                         </button>
                     </form>
+
+                    <div class="admin-entry-row">
+                        <span class="admin-entry-text">Managing the platform instead?</span>
+                        <a href="aou_admin.html" class="admin-entry-btn">🔐 Administrator sign in</a>
+                    </div>
                 </section>
+
+                <aside class="login-visual-side">
+                    <div class="visual-wordmark">
+                        <img class="logo-img" style="height:26px;" src="../static/images/kayfa_wordmark_white.png"
+                            alt="Kayfa">
+                    </div>
+                    <div class="visual-overlay">
+                        <div class="visual-caption">Your grades, schedule, and an AI advisor —<br>in one place.</div>
+                    </div>
+                </aside>
             </div>
         </section>
     </main>
 
-    <!-- AI AGENT HOME PAGE -->
-    <main id="dashboardView" class="view" style="display:none; height: 100vh; flex-direction: column;">
+    <main id="dashboardView" class="view" style="display:none;">
         <header class="dash-navbar">
             <div class="dash-logo">
-                <img src="../static/kayfa_logo_white.png" alt="Kayfa Logo" style="height: 35px; object-fit: contain;">
-                <span
-                    style="font-weight: bold; font-size: 18px; border-left: 2px solid rgba(255,255,255,0.3); padding-left: 10px; margin-left: 10px;">Agentic
-                    LMS</span>
+                <img class="logo-img icon small" aria-hidden="true" src="../static/images/kayfa_icon_white.png" alt="">
+                <div class="logo-text">
+                    <span class="logo-line1">Kayfa Learning Platform</span>
+                    <span class="logo-line2">Student portal</span>
+                </div>
             </div>
+
+            <nav class="dash-tabs" aria-label="Dashboard navigation">
+                <button class="dash-tab active" data-tab="home">Home</button>
+                <button class="dash-tab" data-tab="grades">Grades</button>
+                <button class="dash-tab" data-tab="schedule">Schedule</button>
+                <button class="dash-tab" data-tab="registration">Registration</button>
+                <button class="dash-tab" data-tab="financial">Financial</button>
+                <button class="dash-tab" data-tab="other">Other Services</button>
+            </nav>
+
             <div class="dash-user">
-                <span class="user-name" id="navUserName">—</span>
+                <button type="button" class="theme-toggle on-chrome" id="themeToggleDash"
+                    aria-label="Switch to dark mode">
+                    <span class="theme-toggle-icon sun">☀️</span>
+                    <span class="theme-toggle-icon moon">🌙</span>
+                    <span class="theme-toggle-thumb"></span>
+                </button>
+                <span class="user-icon" aria-hidden="true">👤</span>
+                <div class="user-meta">
+                    <span class="user-id" id="navUserId">—</span>
+                    <span class="user-name" id="navUserName">—</span>
+                </div>
                 <span class="user-role" id="navUserRole">—</span>
                 <button type="button" class="logout-button" id="logoutBtn">Logout</button>
             </div>
         </header>
 
-        <section class="dash-content full-chat-layout">
-            <div class="main-chat-container">
-                <div class="ai-panel-body" id="aiMessages" aria-live="polite"></div>
-                <div class="ai-panel-input">
-                    <input type="text" id="aiInputBox" placeholder="Message the Kayfa Agent..." autocomplete="off">
-                    <button id="aiSendBtn" type="button">➤</button>
-                </div>
+        <section class="dash-content">
+            <div class="semester-bar">
+                <span>Academic Semester: <b id="currentSemester">Fall 2026</b></span>
             </div>
+
+            <section class="info-card">
+                <div class="info-left">
+                    <h2>👤 <span id="profileTitle">User Information</span></h2>
+                    <div class="info-stats">
+                        <div class="stat-item"><span class="stat-label">GPA:</span><span class="stat-value"
+                                id="statGpa">—</span></div>
+                        <div class="stat-item"><span class="stat-label">Advisor:</span><span class="stat-value"
+                                id="statAdvisor">—</span></div>
+                        <div class="stat-item"><span class="stat-label">Completed Credits:</span><span
+                                class="stat-value" id="statHours">—</span></div>
+                        <div class="stat-item"><span class="stat-label">Department:</span><span class="stat-value"
+                                id="statDepartment">—</span></div>
+                    </div>
+                </div>
+
+                <div class="info-progress">
+                    <div class="progress-ring" id="progressRing" style="--pct:0deg;">
+                        <div class="progress-inner">
+                            <span class="progress-pct" id="progressPct">—</span>
+                        </div>
+                    </div>
+                    <div class="progress-caption">Academic Plan Completion</div>
+                    <div class="progress-hours">Completed Credits: <b id="progressHours">—</b></div>
+                </div>
+
+                <div class="info-right">
+                    <div class="info-right-row"><span>User ID:</span><b id="cardUserId">—</b></div>
+                    <div class="info-right-row"><span>Name:</span><b id="cardUserName">—</b></div>
+                    <div class="info-right-row"><span>Program:</span><b id="cardProgram">—</b></div>
+                    <div class="info-right-row"><span>Role:</span><b id="cardRole">—</b></div>
+                    <div class="photo-frame" id="photoFrame" aria-label="Profile placeholder"></div>
+                </div>
+            </section>
+
+            <section class="tiles-grid" aria-label="University services" id="serviceTiles">
+                <button class="tile active-tile" data-service="grades">
+                    <div class="tile-icon">🏅</div>
+                    <div class="tile-label">Grades</div>
+                </button>
+                <button class="tile" data-service="schedule">
+                    <div class="tile-icon">📅</div>
+                    <div class="tile-label">Schedule</div>
+                </button>
+                <button class="tile" data-service="registration">
+                    <div class="tile-icon">📖</div>
+                    <div class="tile-label">Registration</div>
+                    <span class="tile-soon-badge">Soon</span>
+                </button>
+                <button class="tile" data-service="financial">
+                    <div class="tile-icon">💲</div>
+                    <div class="tile-label">Financial</div>
+                    <span class="tile-soon-badge">Soon</span>
+                </button>
+                <button class="tile" data-service="lms">
+                    <div class="tile-icon">📘</div>
+                    <div class="tile-label">LMS</div>
+                    <span class="tile-soon-badge">Soon</span>
+                </button>
+                <button class="tile" data-service="other">
+                    <div class="tile-icon">🔲</div>
+                    <div class="tile-label">Other Services</div>
+                    <span class="tile-soon-badge">Soon</span>
+                </button>
+            </section>
+
+            <!-- Grades panel -->
+            <section class="panel" id="gradesPanel">
+                <h3 class="panel-title">Grades</h3>
+                <p class="panel-sub">All recorded coursework, most recent first.</p>
+                <div id="gradesTableWrap">
+                    <div class="dashboard-status">Loading grades…</div>
+                </div>
+            </section>
+
+            <!-- Schedule panel -->
+            <section class="panel" id="schedulePanel" style="display:none;">
+                <h3 class="panel-title">Schedule</h3>
+                <p class="panel-sub">Sections you are currently enrolled in.</p>
+                <div id="scheduleTableWrap">
+                    <div class="dashboard-status">Loading schedule…</div>
+                </div>
+            </section>
         </section>
+
+        <button id="aiAvatarBtn" class="ai-avatar" title="Open Kayfa AI" aria-label="Open Kayfa AI assistant"></button>
+
+        <aside id="aiPanel" class="ai-panel" aria-label="Kayfa AI Assistant">
+            <header class="ai-panel-header">
+                <div class="ai-panel-title">
+                    <img src="../static/images/kayfa_icon_white.png" alt="" style="height:16px;width:auto;">
+                    <span class="ai-dot"></span>Kayfa AI Assistant
+                </div>
+                <button id="aiCloseBtn" class="ai-close-btn" type="button" aria-label="Close AI assistant">✕</button>
+            </header>
+            <div class="ai-panel-body" id="aiMessages" aria-live="polite"></div>
+            <div class="ai-panel-input">
+                <input type="text" id="aiInputBox" placeholder="Ask Kayfa AI…" maxlength="4000" autocomplete="off">
+                <button id="aiVoiceBtn" class="ai-voice-btn" type="button" aria-label="Record voice">🎙️</button>
+                <button id="aiSendBtn" type="button" aria-label="Send message">➤</button>
+            </div>
+        </aside>
     </main>
 
+    <div id="toastHost" aria-live="polite"></div>
+
+    <!-- Update these paths when serving through FastAPI -->
+    <script src="../static/js/theme.js"></script>
     <script src="../static/js/aou_js.js"></script>
 </body>
 
