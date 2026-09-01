@@ -11,7 +11,25 @@ const loginSpinner = document.getElementById("loginSpinner");
 
 let currentUser = { id: null, role: null, name: null };
 let chatHistory = [];
+let gradesLoaded = false;
+let scheduleLoaded = false;
 
+/* ------------------------------------------------------------------ */
+/* Toast helper                                                       */
+/* ------------------------------------------------------------------ */
+function showToast(message) {
+    const host = document.getElementById("toastHost");
+    if (!host) return;
+    const el = document.createElement("div");
+    el.className = "toast";
+    el.textContent = message;
+    host.appendChild(el);
+    setTimeout(() => el.remove(), 2600);
+}
+
+/* ------------------------------------------------------------------ */
+/* Password visibility                                                */
+/* ------------------------------------------------------------------ */
 if (togglePassword) {
     togglePassword.addEventListener("click", () => {
         if (passwordInput.type === "password") {
@@ -24,6 +42,9 @@ if (togglePassword) {
     });
 }
 
+/* ------------------------------------------------------------------ */
+/* Login                                                               */
+/* ------------------------------------------------------------------ */
 if (loginForm) {
     loginForm.addEventListener("submit", async (e) => {
         e.preventDefault();
@@ -33,12 +54,12 @@ if (loginForm) {
         const role = document.getElementById("roleInput").value;
         const password = document.getElementById("passwordInput").value;
 
-        if (!userId) { loginError.textContent = "من فضلك أدخل الـ User ID."; return; }
-        if (!role) { loginError.textContent = "من فضلك اختر نوع الحساب."; return; }
-        if (!password) { loginError.textContent = "من فضلك أدخل كلمة المرور."; return; }
+        if (!userId) { loginError.textContent = "Please enter your User ID."; return; }
+        if (!role) { loginError.textContent = "Please select your account type."; return; }
+        if (!password) { loginError.textContent = "Please enter your password."; return; }
 
         loginButton.disabled = true;
-        if (loginButtonText) loginButtonText.textContent = "Logging in...";
+        if (loginButtonText) loginButtonText.textContent = "Signing in…";
         if (loginSpinner) loginSpinner.hidden = false;
 
         try {
@@ -64,13 +85,14 @@ if (loginForm) {
             currentUser = { id: data.user.id, role: data.user.role, name: data.user.name };
 
             populateDashboard(data.user);
+            showView("home");
             loginView.style.display = "none";
             dashboardView.style.display = "block";
         } catch (err) {
-            loginError.textContent = "⚠️ تعذر الاتصال بالسيرفر. تأكد أن AOU_API.py شغال على port 8000.";
+            loginError.textContent = "⚠️ Could not reach the server. Make sure the API is running.";
         } finally {
             loginButton.disabled = false;
-            if (loginButtonText) loginButtonText.textContent = "Login";
+            if (loginButtonText) loginButtonText.textContent = "Sign in";
             if (loginSpinner) loginSpinner.hidden = true;
         }
     });
@@ -98,6 +120,12 @@ function populateDashboard(userData) {
     const statDepartment = document.getElementById("statDepartment");
     if (statDepartment) statDepartment.textContent = userData.dept_name || "—";
 
+    const statAdvisor = document.getElementById("statAdvisor");
+    if (statAdvisor) statAdvisor.textContent = userData.advisor || "—";
+
+    const currentSemester = document.getElementById("currentSemester");
+    if (currentSemester) currentSemester.textContent = userData.semester || "—";
+
     const statHours = document.getElementById("statHours");
     const progressHours = document.getElementById("progressHours");
     const hours = userData.tot_cred;
@@ -112,22 +140,179 @@ function populateDashboard(userData) {
         const pct = Math.min(100, Math.round(Number(hours) / 1.4));
         if (progressPct) progressPct.textContent = `${pct}%`;
         if (progressRing) progressRing.style.setProperty("--pct", `${pct * 3.6}deg`);
-    } else {
-        if (progressPct) progressPct.textContent = "—";
+    } else if (progressPct) {
+        progressPct.textContent = "—";
     }
 
     const statGpa = document.getElementById("statGpa");
     if (statGpa) statGpa.textContent = userData.gpa != null ? userData.gpa : "—";
 }
 
+/* ------------------------------------------------------------------ */
+/* Tabs & tiles → panel routing                                       */
+/* ------------------------------------------------------------------ */
+const READY_SERVICES = ["home", "grades", "schedule"];
+
+function showView(service) {
+    document.querySelectorAll(".dash-tab").forEach((t) => {
+        t.classList.toggle("active", t.dataset.tab === service || (service === "home" && t.dataset.tab === "home"));
+    });
+    document.querySelectorAll(".tile").forEach((t) => {
+        t.classList.toggle("active-tile", t.dataset.service === service);
+    });
+
+    const gradesPanel = document.getElementById("gradesPanel");
+    const schedulePanel = document.getElementById("schedulePanel");
+
+    if (service === "grades") {
+        gradesPanel.style.display = "block";
+        schedulePanel.style.display = "none";
+        if (!gradesLoaded) loadGrades();
+    } else if (service === "schedule") {
+        gradesPanel.style.display = "none";
+        schedulePanel.style.display = "block";
+        if (!scheduleLoaded) loadSchedule();
+    } else {
+        // "home" and any not-yet-built service: show grades by default under Home
+        gradesPanel.style.display = "block";
+        schedulePanel.style.display = "none";
+        if (!gradesLoaded) loadGrades();
+    }
+}
+
 document.querySelectorAll(".dash-tab").forEach((tab) => {
     tab.addEventListener("click", (e) => {
         e.preventDefault();
-        document.querySelectorAll(".dash-tab").forEach((t) => t.classList.remove("active"));
-        tab.classList.add("active");
+        const service = tab.dataset.tab;
+        if (!READY_SERVICES.includes(service)) {
+            showToast(`${tab.textContent.trim()} is coming soon.`);
+            return;
+        }
+        showView(service);
     });
 });
 
+document.querySelectorAll(".tile").forEach((tile) => {
+    tile.addEventListener("click", () => {
+        const service = tile.dataset.service;
+        if (!READY_SERVICES.includes(service)) {
+            const label = tile.querySelector(".tile-label")?.textContent || "This feature";
+            showToast(`${label} is coming soon.`);
+            return;
+        }
+        showView(service);
+    });
+});
+
+/* ------------------------------------------------------------------ */
+/* Grades / Schedule data                                             */
+/* ------------------------------------------------------------------ */
+function gradeChipClass(grade) {
+    if (!grade) return "mid";
+    const g = grade.toUpperCase();
+    if (g.startsWith("A")) return "good";
+    if (g === "F" || g.startsWith("D")) return "low";
+    return "mid";
+}
+
+async function authedGet(path) {
+    const token = localStorage.getItem("access_token");
+    const res = await fetch(`${API_BASE}${path}`, {
+        headers: { "Authorization": `Bearer ${token}` }
+    });
+    if (res.status === 401) {
+        localStorage.removeItem("access_token");
+        localStorage.removeItem("current_user");
+        loginView.style.display = "block";
+        dashboardView.style.display = "none";
+        throw new Error("Session expired");
+    }
+    return res.json();
+}
+
+async function loadGrades() {
+    const wrap = document.getElementById("gradesTableWrap");
+    try {
+        const data = await authedGet("/api/academic/grades");
+        const grades = data.grades || [];
+        gradesLoaded = true;
+        if (grades.length === 0) {
+            wrap.innerHTML = `<div class="empty-state">No grades on record yet.</div>`;
+            return;
+        }
+        const rows = grades.map(g => `
+            <tr>
+                <td>${escapeHtml(g.course_id)}</td>
+                <td>${escapeHtml(g.title || "—")}</td>
+                <td>${g.credits != null ? g.credits : "—"}</td>
+                <td>${escapeHtml(g.semester || "—")} ${g.year || ""}</td>
+                <td><span class="grade-chip ${gradeChipClass(g.grade)}">${escapeHtml(g.grade || "—")}</span></td>
+            </tr>
+        `).join("");
+        wrap.innerHTML = `
+            <table class="data-table">
+                <thead><tr><th>Course</th><th>Title</th><th>Credits</th><th>Term</th><th>Grade</th></tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    } catch (err) {
+        if (err.message !== "Session expired") {
+            wrap.innerHTML = `<div class="empty-state">⚠️ Could not load grades right now.</div>`;
+        }
+    }
+}
+
+async function loadSchedule() {
+    const wrap = document.getElementById("scheduleTableWrap");
+    try {
+        const data = await authedGet("/api/academic/schedule");
+        const rows_ = data.schedule || [];
+        scheduleLoaded = true;
+        if (rows_.length === 0) {
+            wrap.innerHTML = `<div class="empty-state">No scheduled sections found.</div>`;
+            return;
+        }
+        const rows = rows_.map(s => {
+            const day = s.day != null ? s.day : "—";
+            const start = (s.start_hr != null) ? `${String(s.start_hr).padStart(2, "0")}:${String(s.start_min || 0).padStart(2, "0")}` : "—";
+            const end = (s.end_hr != null) ? `${String(s.end_hr).padStart(2, "0")}:${String(s.end_min || 0).padStart(2, "0")}` : "—";
+            const location = [s.building, s.room_number].filter(Boolean).join(" ");
+            return `
+                <tr>
+                    <td>${escapeHtml(s.course_id)}</td>
+                    <td>${escapeHtml(s.title || "—")}</td>
+                    <td>${escapeHtml(String(day))}</td>
+                    <td>${start} – ${end}</td>
+                    <td>${escapeHtml(location || "—")}</td>
+                </tr>
+            `;
+        }).join("");
+        wrap.innerHTML = `
+            <table class="data-table">
+                <thead><tr><th>Course</th><th>Title</th><th>Day</th><th>Time</th><th>Location</th></tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    } catch (err) {
+        if (err.message !== "Session expired") {
+            wrap.innerHTML = `<div class="empty-state">⚠️ Could not load your schedule right now.</div>`;
+        }
+    }
+}
+
+function escapeHtml(text) {
+    if (text === null || text === undefined) return "";
+    return text.toString()
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+/* ------------------------------------------------------------------ */
+/* AI chat panel                                                      */
+/* ------------------------------------------------------------------ */
 const aiAvatarBtn = document.getElementById("aiAvatarBtn");
 const aiPanel = document.getElementById("aiPanel");
 const aiCloseBtn = document.getElementById("aiCloseBtn");
@@ -145,7 +330,7 @@ if (aiAvatarBtn) {
         aiPanel.classList.add("open");
         aiAvatarBtn.classList.add("hidden");
         if (aiMessages.children.length === 0) {
-            appendMessage("assistant", "أهلاً! أنا CampusX AI 👋 اسألني عن دراستك أو أي حاجة تخص الجامعة.");
+            appendMessage("assistant", "Hi! I'm Kayfa AI 👋 Ask me about your grades, schedule, or anything about your studies.");
         }
     });
 }
@@ -168,21 +353,12 @@ function appendMessage(role, text, sentiment = null) {
     if (sentiment) {
         const badge = document.createElement("div");
         badge.className = "sentiment-badge";
-        const label = sentiment.label || "Unknown";
+        const label = (sentiment.label || "Unknown").toLowerCase();
         const confidence = Number(sentiment.confidence || 0);
-
         let emoji = "⚪";
-        let textLabel = label;
-
-        if (label.toLowerCase() === "positive") {
-            emoji = "🟢"; textLabel = "إيجابي";
-        } else if (label.toLowerCase() === "negative") {
-            emoji = "🔴"; textLabel = "سلبي";
-        } else if (label.toLowerCase() === "neutral") {
-            emoji = "⚪"; textLabel = "محايد";
-        }
-
-        badge.textContent = `${emoji} ${textLabel} (${Math.round(confidence * 100)}%)`;
+        if (label === "positive") emoji = "🟢";
+        else if (label === "negative") emoji = "🔴";
+        badge.textContent = `${emoji} ${sentiment.label || "Unknown"} (${Math.round(confidence * 100)}%)`;
         wrapper.appendChild(badge);
     }
 
@@ -197,15 +373,15 @@ async function sendMessage() {
 
     const token = localStorage.getItem("access_token");
     if (!token) {
-        appendMessage("assistant", "⚠️ انتهت جلسة الدخول. من فضلك سجل الدخول مرة أخرى.");
+        appendMessage("assistant", "⚠️ Your session has expired. Please sign in again.");
         return;
     }
 
     appendMessage("user", text);
     aiInputBox.value = "";
 
-    const typingEl = appendMessage("typing", "بيكتب...");
-    typingEl.classList.add("typing");
+    const typingWrapper = appendMessage("typing", "Typing…");
+    typingWrapper.parentElement.classList.add("typing");
 
     try {
         const res = await fetch(`${API_BASE}/api/chat`, {
@@ -218,26 +394,26 @@ async function sendMessage() {
         });
         const data = await res.json();
 
-        typingEl.remove();
+        typingWrapper.parentElement.remove();
 
         if (!res.ok) {
             if (res.status === 401) {
                 localStorage.removeItem("access_token");
                 localStorage.removeItem("current_user");
-                appendMessage("assistant", "⚠️ انتهت جلسة الدخول. سجل الدخول مرة أخرى.");
+                appendMessage("assistant", "⚠️ Your session has expired. Please sign in again.");
                 return;
             }
-            appendMessage("assistant", data.detail || "معلش، حصل خطأ في الرد.");
+            appendMessage("assistant", data.detail || "Sorry, something went wrong with that reply.");
             return;
         }
 
-        appendMessage("assistant", data.response || "معلش، حصل خطأ في الرد.", data.sentiment || null);
+        appendMessage("assistant", data.response || "Sorry, something went wrong with that reply.", data.sentiment || null);
 
         chatHistory.push({ role: "user", content: text });
         chatHistory.push({ role: "assistant", content: data.response || "" });
     } catch (err) {
-        if (typingEl && typingEl.parentNode) typingEl.remove();
-        appendMessage("assistant", "⚠️ تعذر الاتصال بالـ AI server. تأكد أن API شغال.");
+        if (typingWrapper && typingWrapper.parentElement) typingWrapper.parentElement.remove();
+        appendMessage("assistant", "⚠️ Could not reach the AI server. Make sure the API is running.");
     }
 }
 
@@ -254,12 +430,12 @@ if (aiInputBox) {
 async function sendAudioToAI(blob) {
     const token = localStorage.getItem("access_token");
     if (!token) {
-        appendMessage("assistant", "⚠️ انتهت جلسة الدخول. من فضلك سجل الدخول مرة أخرى.");
+        appendMessage("assistant", "⚠️ Your session has expired. Please sign in again.");
         return;
     }
 
-    const typingEl = appendMessage("typing", "يستمع ويفسر الصوت...");
-    typingEl.classList.add("typing");
+    const typingWrapper = appendMessage("typing", "Listening and transcribing…");
+    typingWrapper.parentElement.classList.add("typing");
 
     try {
         const formData = new FormData();
@@ -267,45 +443,41 @@ async function sendAudioToAI(blob) {
 
         const res = await fetch(`${API_BASE}/api/chat/audio`, {
             method: "POST",
-            headers: {
-                "Authorization": `Bearer ${token}`
-            },
+            headers: { "Authorization": `Bearer ${token}` },
             body: formData
         });
 
         const data = await res.json();
-        typingEl.remove();
+        typingWrapper.parentElement.remove();
 
         if (!res.ok) {
             if (res.status === 401) {
                 localStorage.removeItem("access_token");
                 localStorage.removeItem("current_user");
-                appendMessage("assistant", "⚠️ انتهت جلسة الدخول. سجل الدخول مرة أخرى.");
+                appendMessage("assistant", "⚠️ Your session has expired. Please sign in again.");
                 return;
             }
-            appendMessage("assistant", data.detail || "تعذر معالجة الصوت.");
+            appendMessage("assistant", data.detail || "Could not process the audio.");
             return;
         }
 
-        appendMessage("assistant", data.response || "معلش، حصل خطأ في الرد.", data.sentiment || null);
+        appendMessage("assistant", data.response || "Sorry, something went wrong with that reply.", data.sentiment || null);
         chatHistory.push({ role: "user", content: "[audio_message]" });
         chatHistory.push({ role: "assistant", content: data.response || "" });
     } catch (err) {
-        if (typingEl && typingEl.parentNode) typingEl.remove();
-        appendMessage("assistant", "⚠️ تعذر إرسال الصوت إلى الخادم. تأكد أن الـ API شغال.");
+        if (typingWrapper && typingWrapper.parentElement) typingWrapper.parentElement.remove();
+        appendMessage("assistant", "⚠️ Could not send the audio to the server.");
     }
 }
 
 async function toggleVoiceRecording() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        appendMessage("assistant", "⚠️ المتصفح الحالي لا يدعم تسجيل الصوت.");
+        appendMessage("assistant", "⚠️ This browser does not support voice recording.");
         return;
     }
 
     if (isRecording) {
-        if (mediaRecorder && mediaRecorder.state !== "inactive") {
-            mediaRecorder.stop();
-        }
+        if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop();
         isRecording = false;
         if (aiVoiceBtn) {
             aiVoiceBtn.classList.remove("is-recording");
@@ -328,9 +500,7 @@ async function toggleVoiceRecording() {
         mediaRecorder.onstop = async () => {
             const audioBlob = new Blob(recordedChunks, { type: mimeType });
             stream.getTracks().forEach((track) => track.stop());
-            if (audioBlob.size > 0) {
-                await sendAudioToAI(audioBlob);
-            }
+            if (audioBlob.size > 0) await sendAudioToAI(audioBlob);
         };
 
         mediaRecorder.start();
@@ -341,15 +511,18 @@ async function toggleVoiceRecording() {
             aiVoiceBtn.setAttribute("aria-label", "Stop recording");
         }
 
-        appendMessage("assistant", "🎙️ جارٍ تسجيل صوتك... اضغط مرة أخرى للإيقاف والإرسال.");
+        appendMessage("assistant", "🎙️ Recording… tap again to stop and send.");
     } catch (err) {
         console.error("Microphone access error:", err);
-        appendMessage("assistant", "⚠️ تعذر الوصول إلى الميكروفون. تأكد من السماح بالإذن.");
+        appendMessage("assistant", "⚠️ Could not access the microphone. Check your browser permissions.");
     }
 }
 
 if (aiVoiceBtn) aiVoiceBtn.addEventListener("click", toggleVoiceRecording);
 
+/* ------------------------------------------------------------------ */
+/* Logout / session restore                                           */
+/* ------------------------------------------------------------------ */
 const logoutBtn = document.getElementById("logoutBtn");
 if (logoutBtn) {
     logoutBtn.addEventListener("click", async () => {
@@ -370,6 +543,8 @@ if (logoutBtn) {
 
         currentUser = { id: null, role: null, name: null };
         chatHistory = [];
+        gradesLoaded = false;
+        scheduleLoaded = false;
 
         dashboardView.style.display = "none";
         loginView.style.display = "block";
@@ -403,7 +578,8 @@ async function restoreSession() {
             role: storedUser.role || "Student",
             name: storedUser.name || userInfo.name
         };
-        populateDashboard({ ...userInfo, id: currentUser.id, role: currentUser.role, name: currentUser.name });
+        populateDashboard({ ...userInfo, ...storedUser, id: currentUser.id, role: currentUser.role, name: currentUser.name });
+        showView("home");
         loginView.style.display = "none";
         dashboardView.style.display = "block";
     } catch (err) {

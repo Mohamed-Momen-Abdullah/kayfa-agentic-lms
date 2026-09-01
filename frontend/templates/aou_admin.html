@@ -4,8 +4,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kayfa Learning AI | STUFF — Admin Observability</title>
+    <title>Kayfa AI | Admin Observability</title>
+    <!-- Apply saved/preferred theme before first paint to avoid a flash -->
+    <script>
+        (function () {
+            try {
+                var t = localStorage.getItem("kayfa-theme");
+                if (!t) { t = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"; }
+                document.documentElement.setAttribute("data-theme", t);
+            } catch (e) {}
+        })();
+    </script>
     <!-- Update these paths when serving through FastAPI -->
+    <link rel="icon" type="image/png" href="../static/images/kayfa_icon_blue.png">
     <link rel="stylesheet" href="../static/css/aou_css.css">
     <link rel="stylesheet" href="../static/css/tracing_css.css">
 </head>
@@ -15,14 +26,22 @@
     <main id="adminLoginView" class="view" aria-label="Admin login page">
         <header class="topbar">
             <div class="topbar-logo">
-                <div class="logo-mark" aria-hidden="true">Kayfa - كيف</div>
+                <div class="brand-logo" aria-hidden="true">
+                    <img class="logo-img logo-light" src="../static/images/kayfa_wordmark_blue.png" alt="">
+                    <img class="logo-img logo-dark" src="../static/images/kayfa_wordmark_white.png" alt="">
+                </div>
                 <div class="logo-text">
-                    <span class="logo-line1">Kayfa learning Platform</span>
-                    <span class="logo-line2">STUFF — Admin Area</span>
+                    <span class="logo-line1">Kayfa Learning Platform</span>
+                    <span class="logo-line2">Admin observability</span>
                 </div>
             </div>
             <div class="topbar-right">
-                <a href="aou_html.html" class="lang-toggle" style="text-decoration:none;">⬅ Back to Portal</a>
+                <button type="button" class="theme-toggle" id="themeToggle" aria-label="Switch to dark mode">
+                    <span class="theme-toggle-icon sun">☀️</span>
+                    <span class="theme-toggle-icon moon">🌙</span>
+                    <span class="theme-toggle-thumb"></span>
+                </button>
+                <a href="aou_html.html" class="lang-toggle" style="text-decoration:none;">⬅ Back to portal</a>
             </div>
         </header>
 
@@ -30,8 +49,8 @@
             <div class="login-card" style="min-height:auto;">
                 <section class="login-form-side" style="flex:1 1 100%;">
                     <div class="login-flag" aria-hidden="true">🔐</div>
-                    <div class="login-title">Kayfa learning Platform — STUFF</div>
-                    <h1 class="login-heading">Admin Observability</h1>
+                    <div class="login-title">Kayfa Learning Platform — Admin</div>
+                    <h1 class="login-heading">Admin observability</h1>
                     <p class="login-sub">Restricted area. Authorized personnel only.</p>
 
                     <form id="adminLoginForm" autocomplete="on">
@@ -58,7 +77,7 @@
                         <div id="adminLoginError" class="login-error" role="alert" aria-live="polite"></div>
 
                         <button type="submit" id="adminLoginButton" class="btn-login">
-                            <span id="adminLoginButtonText">Login</span>
+                            <span id="adminLoginButtonText">Sign in</span>
                             <span id="adminLoginSpinner" class="button-spinner" hidden>⏳</span>
                         </button>
                     </form>
@@ -70,14 +89,19 @@
     <main id="adminDashboardView" class="view" style="display:none;">
         <header class="dash-navbar">
             <div class="dash-logo">
-                <div class="logo-mark small" aria-hidden="true">Kayfa - كيف</div>
+                <img class="logo-img icon small" aria-hidden="true" src="../static/images/kayfa_icon_white.png" alt="">
                 <div class="logo-text">
-                    <span class="logo-line1">Kayfa learning Platform</span>
-                    <span class="logo-line2">STUFF — Admin Observability</span>
+                    <span class="logo-line1">Kayfa Learning Platform</span>
+                    <span class="logo-line2">Admin observability</span>
                 </div>
             </div>
 
             <div class="dash-user">
+                <button type="button" class="theme-toggle on-chrome" id="themeToggleDash" aria-label="Switch to dark mode">
+                    <span class="theme-toggle-icon sun">☀️</span>
+                    <span class="theme-toggle-icon moon">🌙</span>
+                    <span class="theme-toggle-thumb"></span>
+                </button>
                 <a href="aou_html.html" class="logout-button" style="text-decoration:none;">⬅ Portal</a>
                 <button type="button" class="logout-button" id="adminLogoutBtn">Logout</button>
             </div>
@@ -107,35 +131,86 @@
                 </div>
             </section>
 
-            <section class="admin-filters">
-                <div class="admin-filter-item">
-                    <label class="field-label">User ID</label>
-                    <select id="filterUser" class="admin-select">
-                        <option value="All">All</option>
-                    </select>
-                </div>
-                <div class="admin-filter-item">
-                    <label class="field-label">Role</label>
-                    <select id="filterRole" class="admin-select">
-                        <option value="All">All</option>
-                    </select>
-                </div>
-                <div class="admin-filter-item admin-filter-search">
-                    <label class="field-label">Search in queries</label>
-                    <input type="text" id="filterSearch" class="admin-search-input"
-                        placeholder="grades, schedule, courses...">
-                </div>
-                <div class="admin-filter-item">
-                    <button type="button" class="btn-login" id="refreshTracesBtn" style="margin-top:22px;">🔄
-                        Refresh</button>
-                </div>
-            </section>
+            <nav class="admin-tabs" aria-label="Admin sections">
+                <button class="admin-tab-btn active" data-admin-tab="overview">Overview</button>
+                <button class="admin-tab-btn" data-admin-tab="cost">Cost analytics</button>
+                <button class="admin-tab-btn" data-admin-tab="export">Export</button>
+            </nav>
 
-            <div id="adminStatus" class="dashboard-status"></div>
-            <section id="adminTraceList" class="admin-trace-list"></section>
+            <!-- Overview tab -->
+            <div class="admin-tab-panel active" id="tab-overview">
+                <section class="admin-filters">
+                    <div class="admin-filter-item">
+                        <label class="field-label">User ID</label>
+                        <select id="filterUser" class="admin-select">
+                            <option value="All">All</option>
+                        </select>
+                    </div>
+                    <div class="admin-filter-item">
+                        <label class="field-label">Role</label>
+                        <select id="filterRole" class="admin-select">
+                            <option value="All">All</option>
+                        </select>
+                    </div>
+                    <div class="admin-filter-item">
+                        <label class="field-label">From</label>
+                        <input type="date" id="filterDateFrom" class="admin-date-input">
+                    </div>
+                    <div class="admin-filter-item">
+                        <label class="field-label">To</label>
+                        <input type="date" id="filterDateTo" class="admin-date-input">
+                    </div>
+                    <div class="admin-filter-item admin-filter-search">
+                        <label class="field-label">Search in queries</label>
+                        <input type="text" id="filterSearch" class="admin-search-input"
+                            placeholder="grades, schedule, courses...">
+                    </div>
+                    <div class="admin-filter-item">
+                        <button type="button" class="btn-login" id="refreshTracesBtn" style="padding:9px 18px;">🔄
+                            Refresh</button>
+                    </div>
+                </section>
+
+                <div id="adminStatus" class="dashboard-status"></div>
+                <section id="adminTraceList" class="admin-trace-list"></section>
+            </div>
+
+            <!-- Cost analytics tab (preview / mock, until billing backend is wired up) -->
+            <div class="admin-tab-panel" id="tab-cost">
+                <div class="spike-banner" id="spikeBanner">Checking for cost spikes…</div>
+
+                <section class="panel">
+                    <h3 class="panel-title">Cost &amp; usage trends <span class="preview-badge">Preview data</span></h3>
+                    <p class="panel-sub">This view is illustrative until per-request cost is streamed from the backend. Wiring it to live data is a phase-2 backend task.</p>
+
+                    <div class="cost-grid">
+                        <div>
+                            <div class="admin-kpi-label" style="margin-bottom:10px;">Daily spend, last 7 days</div>
+                            <div class="chart-bars" id="costChartBars"></div>
+                        </div>
+                        <div>
+                            <div class="admin-kpi-label" style="margin-bottom:10px;">Top users by cost</div>
+                            <div class="rank-list" id="costRankList"></div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Export tab -->
+            <div class="admin-tab-panel" id="tab-export">
+                <section class="panel">
+                    <h3 class="panel-title">Export logs</h3>
+                    <p class="panel-sub">Download the traces currently loaded in the Overview tab (respects any active filters) as a CSV file.</p>
+                    <div class="export-row">
+                        <button type="button" class="btn-login" id="exportCsvBtn" style="width:auto; padding:11px 22px;">⬇ Download CSV</button>
+                        <span class="export-note" id="exportNote">No traces loaded yet.</span>
+                    </div>
+                </section>
+            </div>
         </section>
     </main>
-    <!-- Update this path when serving through FastAPI -->
+    <!-- Update these paths when serving through FastAPI -->
+    <script src="../static/js/theme.js"></script>
     <script src="../static/js/tracing_js.js"></script>
 </body>
 
