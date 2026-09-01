@@ -6,7 +6,6 @@ env/
 
 # Environment Variables & Secrets
 .env
-.env.*
 
 # Python Cache & Build Artifacts
 __pycache__/
