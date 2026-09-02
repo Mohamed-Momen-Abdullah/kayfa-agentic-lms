@@ -1,7 +1,5 @@
 import os
-import sqlite3
 import pandas as pd
-from typing import List
 from llama_index.core import Settings, VectorStoreIndex, StorageContext, load_index_from_storage
 from llama_index.core.schema import TextNode, Document as LlamaDocument
 from llama_index.llms.groq import Groq as LlamaGroq
@@ -11,7 +9,7 @@ from llama_index.retrievers.bm25 import BM25Retriever
 from llama_index.core.retrievers import QueryFusionRetriever
 
 from app.agents.config import GROQ_MODEL, GROQ_API_KEY, EMBEDDING_MODEL
-from app.data.connector import DATA_FOLDER_PATH, DB_PATH
+from app.data.connector import DATA_FOLDER_PATH
 from app.services.sentiment import arabic_tokenizer
 from app.observability.tracing import callback_manager
 
@@ -20,40 +18,6 @@ IQ_QUERY_TERMS = ("iq", "iq test", "iq quiz", "intelligence test", "intelligence
 def is_iq_query(query: str) -> bool:
     q = str(query).lower().strip()
     return any(term in q for term in IQ_QUERY_TERMS)
-
-def build_documents_from_table_fast(conn, table: str) -> List[LlamaDocument]:
-    TABLE_LIMITS = {"student": 2000, "instructor": 50, "course": 200, "department": 20, "classroom": 30, "section": 100, "takes": 6000, "teaches": 100, "advisor": 1000, "prereq": 100, "time_slot": 20, "Students": 2000, "Instructors": 50, "Courses": 200, "Departments": 20, "Classrooms": 30, "Sections": 100, "Enrollments": 6000, "Teaching": 100, "Advisors": 1000, "Prerequisites": 100, "TimeSlots": 20}
-    try:
-        limit = TABLE_LIMITS.get(table)
-        query = f"SELECT * FROM \"{table}\" LIMIT {limit}" if limit is not None else f"SELECT * FROM \"{table}\""
-        df = pd.read_sql(query, conn)
-    except Exception as e:
-        print(f"⚠️ Could not load table {table}: {e}")
-        return []
-    if df.empty: return []
-
-    documents = []
-    for idx, row in df.iterrows():
-        metadata = {"source": table, "row_id": int(idx)}
-        if "ID" in row.index and pd.notna(row["ID"]): metadata["person_id"] = str(row["ID"])
-        if "student_id" in row.index and pd.notna(row["student_id"]): metadata["student_id"] = str(row["student_id"])
-        if "instructor_id" in row.index and pd.notna(row["instructor_id"]): metadata["instructor_id"] = str(row["instructor_id"])
-        if "course_id" in row.index and pd.notna(row["course_id"]): metadata["course_id"] = str(row["course_id"])
-        
-        parts = [f"{col}: {val}" for col, val in row.items() if pd.notnull(val)]
-        documents.append(LlamaDocument(text=f"جدول {table}: {' | '.join(parts)}", metadata=metadata))
-    return documents
-
-def load_documents_from_database(db_path: str) -> List[LlamaDocument]:
-    documents = []
-    if not os.path.exists(db_path): return documents
-    conn = sqlite3.connect(db_path)
-    try:
-        for table in ["Students", "Instructors", "Departments", "Courses", "Classrooms", "Sections", "Enrollments", "Teaching", "Advisors", "Prerequisites", "TimeSlots"]:
-            documents.extend(build_documents_from_table_fast(conn, table))
-    finally:
-        conn.close()
-    return documents
 
 def load_documents_from_folder(folder_path: str):
     json_documents, csv_documents = [], []
@@ -98,7 +62,6 @@ def init_hybrid_agent_system():
 
     if vector_index is None:
         json_documents, csv_documents = load_documents_from_folder(DATA_FOLDER_PATH)
-        db_documents = load_documents_from_database(DB_PATH)
         json_nodes = []
         if json_documents:
             try:
@@ -107,8 +70,7 @@ def init_hybrid_agent_system():
             except Exception:
                 json_nodes = splitter.get_nodes_from_documents(json_documents)
         csv_nodes = [TextNode(text=doc.text, metadata=doc.metadata) for doc in csv_documents]
-        db_nodes = [TextNode(text=doc.text, metadata=doc.metadata) for doc in db_documents]
-        nodes = json_nodes + csv_nodes + db_nodes
+        nodes = json_nodes + csv_nodes
 
         if nodes:
             vector_index = VectorStoreIndex(nodes, show_progress=False)

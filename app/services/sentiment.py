@@ -4,9 +4,10 @@ import pickle
 import numpy as np
 from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing.sequence import pad_sequences
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-SENTIMENT_MODEL_PATH = os.getenv("SENTIMENT_MODEL_PATH", r"/home/azure/Kayfa/kayfa-agentic-lms/app/services/sentiment_model_glove.keras")
-TOKENIZER_PATH = os.getenv("TOKENIZER_PATH", r"/home/azure/Kayfa/kayfa-agentic-lms/app/services/tokenizer.pkl")
+SENTIMENT_MODEL_PATH = os.getenv("SENTIMENT_MODEL_PATH", os.path.join(BASE_DIR, "sentiment_model_glove.keras"))
+TOKENIZER_PATH = os.getenv("TOKENIZER_PATH", os.path.join(BASE_DIR, "tokenizer.pkl"))
 
 class SentimentAnalyzer:
     def __init__(self):

@@ -8,28 +8,17 @@ const passwordInput = document.getElementById("passwordInput");
 const loginButton = document.getElementById("loginButton");
 const loginButtonText = document.getElementById("loginButtonText");
 const loginSpinner = document.getElementById("loginSpinner");
+const roleContent = document.getElementById("roleContent");
+const dashboardStatus = document.getElementById("dashboardStatus");
 
 let currentUser = { id: null, role: null, name: null };
 let chatHistory = [];
-let gradesLoaded = false;
-let scheduleLoaded = false;
 
-/* ------------------------------------------------------------------ */
-/* Toast helper                                                       */
-/* ------------------------------------------------------------------ */
-function showToast(message) {
-    const host = document.getElementById("toastHost");
-    if (!host) return;
-    const el = document.createElement("div");
-    el.className = "toast";
-    el.textContent = message;
-    host.appendChild(el);
-    setTimeout(() => el.remove(), 2600);
+function authHeaders() {
+    const token = localStorage.getItem("access_token");
+    return token ? { "Authorization": `Bearer ${token}` } : {};
 }
 
-/* ------------------------------------------------------------------ */
-/* Password visibility                                                */
-/* ------------------------------------------------------------------ */
 if (togglePassword) {
     togglePassword.addEventListener("click", () => {
         if (passwordInput.type === "password") {
@@ -42,40 +31,33 @@ if (togglePassword) {
     });
 }
 
-/* ------------------------------------------------------------------ */
-/* Login                                                               */
-/* ------------------------------------------------------------------ */
 if (loginForm) {
     loginForm.addEventListener("submit", async (e) => {
         e.preventDefault();
         loginError.textContent = "";
 
-        const userId = document.getElementById("userIdInput").value.trim();
+        const username = document.getElementById("usernameInput").value.trim();
         const role = document.getElementById("roleInput").value;
         const password = document.getElementById("passwordInput").value;
 
-        if (!userId) { loginError.textContent = "Please enter your User ID."; return; }
+        if (!username) { loginError.textContent = "Please enter your username."; return; }
         if (!role) { loginError.textContent = "Please select your account type."; return; }
         if (!password) { loginError.textContent = "Please enter your password."; return; }
 
         loginButton.disabled = true;
-        if (loginButtonText) loginButtonText.textContent = "Signing in…";
+        if (loginButtonText) loginButtonText.textContent = "Logging in...";
         if (loginSpinner) loginSpinner.hidden = false;
 
         try {
             const res = await fetch(`${API_BASE}/api/auth/login`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ user_id: userId, role: role, password: password })
+                body: JSON.stringify({ username: username, role: role, password: password })
             });
             const data = await res.json();
 
             if (!res.ok) {
                 loginError.textContent = data.detail || "Invalid credentials.";
-                return;
-            }
-            if (!data.access_token) {
-                loginError.textContent = "Login succeeded but no access token was returned.";
                 return;
             }
 
@@ -84,253 +66,256 @@ if (loginForm) {
 
             currentUser = { id: data.user.id, role: data.user.role, name: data.user.name };
 
-            populateDashboard(data.user);
-            showView("home");
+            populateNav(data.user);
             loginView.style.display = "none";
             dashboardView.style.display = "block";
+            loadReport();
         } catch (err) {
             loginError.textContent = "⚠️ Could not reach the server. Make sure the API is running.";
         } finally {
             loginButton.disabled = false;
-            if (loginButtonText) loginButtonText.textContent = "Sign in";
+            if (loginButtonText) loginButtonText.textContent = "Login";
             if (loginSpinner) loginSpinner.hidden = true;
         }
     });
 }
 
-function populateDashboard(userData) {
+function populateNav(userData) {
     const navUserId = document.getElementById("navUserId");
     const navUserName = document.getElementById("navUserName");
     const navUserRole = document.getElementById("navUserRole");
-
     if (navUserId) navUserId.textContent = userData.id || "—";
     if (navUserName) navUserName.textContent = userData.name || "—";
     if (navUserRole) navUserRole.textContent = userData.role || "—";
-
-    const cardUserId = document.getElementById("cardUserId");
-    const cardUserName = document.getElementById("cardUserName");
-    const cardProgram = document.getElementById("cardProgram");
-    const cardRole = document.getElementById("cardRole");
-
-    if (cardUserId) cardUserId.textContent = userData.id || "—";
-    if (cardUserName) cardUserName.textContent = userData.name || "—";
-    if (cardProgram) cardProgram.textContent = userData.dept_name || "—";
-    if (cardRole) cardRole.textContent = userData.role || "—";
-
-    const statDepartment = document.getElementById("statDepartment");
-    if (statDepartment) statDepartment.textContent = userData.dept_name || "—";
-
-    const statAdvisor = document.getElementById("statAdvisor");
-    if (statAdvisor) statAdvisor.textContent = userData.advisor || "—";
-
-    const currentSemester = document.getElementById("currentSemester");
-    if (currentSemester) currentSemester.textContent = userData.semester || "—";
-
-    const statHours = document.getElementById("statHours");
-    const progressHours = document.getElementById("progressHours");
-    const hours = userData.tot_cred;
-
-    if (statHours) statHours.textContent = hours != null ? hours : "—";
-    if (progressHours) progressHours.textContent = hours != null ? hours : "—";
-
-    const progressPct = document.getElementById("progressPct");
-    const progressRing = document.getElementById("progressRing");
-
-    if (hours != null) {
-        const pct = Math.min(100, Math.round(Number(hours) / 1.4));
-        if (progressPct) progressPct.textContent = `${pct}%`;
-        if (progressRing) progressRing.style.setProperty("--pct", `${pct * 3.6}deg`);
-    } else if (progressPct) {
-        progressPct.textContent = "—";
-    }
-
-    const statGpa = document.getElementById("statGpa");
-    if (statGpa) statGpa.textContent = userData.gpa != null ? userData.gpa : "—";
 }
 
-/* ------------------------------------------------------------------ */
-/* Tabs & tiles → panel routing                                       */
-/* ------------------------------------------------------------------ */
-const READY_SERVICES = ["home", "grades", "schedule"];
-
-function showView(service) {
-    document.querySelectorAll(".dash-tab").forEach((t) => {
-        t.classList.toggle("active", t.dataset.tab === service || (service === "home" && t.dataset.tab === "home"));
-    });
-    document.querySelectorAll(".tile").forEach((t) => {
-        t.classList.toggle("active-tile", t.dataset.service === service);
-    });
-
-    const gradesPanel = document.getElementById("gradesPanel");
-    const schedulePanel = document.getElementById("schedulePanel");
-
-    if (service === "grades") {
-        gradesPanel.style.display = "block";
-        schedulePanel.style.display = "none";
-        if (!gradesLoaded) loadGrades();
-    } else if (service === "schedule") {
-        gradesPanel.style.display = "none";
-        schedulePanel.style.display = "block";
-        if (!scheduleLoaded) loadSchedule();
-    } else {
-        // "home" and any not-yet-built service: show grades by default under Home
-        gradesPanel.style.display = "block";
-        schedulePanel.style.display = "none";
-        if (!gradesLoaded) loadGrades();
-    }
-}
-
-document.querySelectorAll(".dash-tab").forEach((tab) => {
-    tab.addEventListener("click", (e) => {
-        e.preventDefault();
-        const service = tab.dataset.tab;
-        if (!READY_SERVICES.includes(service)) {
-            showToast(`${tab.textContent.trim()} is coming soon.`);
-            return;
-        }
-        showView(service);
-    });
-});
-
-document.querySelectorAll(".tile").forEach((tile) => {
-    tile.addEventListener("click", () => {
-        const service = tile.dataset.service;
-        if (!READY_SERVICES.includes(service)) {
-            const label = tile.querySelector(".tile-label")?.textContent || "This feature";
-            showToast(`${label} is coming soon.`);
-            return;
-        }
-        showView(service);
-    });
-});
-
-/* ------------------------------------------------------------------ */
-/* Grades / Schedule data                                             */
-/* ------------------------------------------------------------------ */
-function gradeChipClass(grade) {
-    if (!grade) return "mid";
-    const g = grade.toUpperCase();
-    if (g.startsWith("A")) return "good";
-    if (g === "F" || g.startsWith("D")) return "low";
-    return "mid";
-}
-
-async function authedGet(path) {
-    const token = localStorage.getItem("access_token");
-    const res = await fetch(`${API_BASE}${path}`, {
-        headers: { "Authorization": `Bearer ${token}` }
-    });
-    if (res.status === 401) {
-        localStorage.removeItem("access_token");
-        localStorage.removeItem("current_user");
-        loginView.style.display = "block";
-        dashboardView.style.display = "none";
-        throw new Error("Session expired");
-    }
-    return res.json();
-}
-
-async function loadGrades() {
-    const wrap = document.getElementById("gradesTableWrap");
+async function loadReport() {
+    dashboardStatus.textContent = "Loading your dashboard...";
+    roleContent.innerHTML = "";
     try {
-        const data = await authedGet("/api/academic/grades");
-        const grades = data.grades || [];
-        gradesLoaded = true;
-        if (grades.length === 0) {
-            wrap.innerHTML = `<div class="empty-state">No grades on record yet.</div>`;
+        const res = await fetch(`${API_BASE}/api/report`, { headers: authHeaders() });
+        if (!res.ok) {
+            if (res.status === 401) return handleUnauthorized();
+            dashboardStatus.textContent = "Could not load your report.";
             return;
         }
-        const rows = grades.map(g => `
-            <tr>
-                <td>${escapeHtml(g.course_id)}</td>
-                <td>${escapeHtml(g.title || "—")}</td>
-                <td>${g.credits != null ? g.credits : "—"}</td>
-                <td>${escapeHtml(g.semester || "—")} ${g.year || ""}</td>
-                <td><span class="grade-chip ${gradeChipClass(g.grade)}">${escapeHtml(g.grade || "—")}</span></td>
-            </tr>
-        `).join("");
-        wrap.innerHTML = `
-            <table class="data-table">
-                <thead><tr><th>Course</th><th>Title</th><th>Credits</th><th>Term</th><th>Grade</th></tr></thead>
-                <tbody>${rows}</tbody>
-            </table>
-        `;
+        const data = await res.json();
+        dashboardStatus.textContent = "";
+        if (currentUser.role === "Student") renderStudent(data);
+        else if (currentUser.role === "Instructor") renderInstructor(data);
+        else if (currentUser.role === "Admin") renderAdmin(data);
     } catch (err) {
-        if (err.message !== "Session expired") {
-            wrap.innerHTML = `<div class="empty-state">⚠️ Could not load grades right now.</div>`;
-        }
+        dashboardStatus.textContent = "⚠️ Could not reach the server.";
     }
 }
 
-async function loadSchedule() {
-    const wrap = document.getElementById("scheduleTableWrap");
+function renderStudent(data) {
+    const courses = data.courses || [];
+    let html = `
+    <section class="info-card">
+        <div class="info-left">
+            <h2>👤 ${data.full_name || "—"}</h2>
+            <div class="info-stats">
+                <div class="stat-item"><span class="stat-label">Department:</span><span class="stat-value">${data.department || "—"}</span></div>
+                <div class="stat-item"><span class="stat-label">Enrolled Courses:</span><span class="stat-value">${data.enrolled_courses_count || 0}</span></div>
+                <div class="stat-item"><span class="stat-label">Average Grade:</span><span class="stat-value">${data.average_grade || 0}/100</span></div>
+                <div class="stat-item"><span class="stat-label">Average Attendance:</span><span class="stat-value">${data.average_attendance || 0}%</span></div>
+            </div>
+        </div>
+    </section>
+    <h3 class="section-title">My Courses</h3>
+    <div class="course-list">`;
+    courses.forEach(c => {
+        html += `
+        <div class="course-card">
+            <div class="course-card-top">
+                <b>${c.code} - ${c.title}</b>
+                <span class="course-grade">${c.final_grade != null ? c.final_grade + "/100" : "No grade yet"}</span>
+            </div>
+            <p class="course-desc">${c.description || ""}</p>
+            <div class="progress-bar-outer"><div class="progress-bar-inner" style="width:${c.progress_percent || 0}%"></div></div>
+            <span class="course-progress-label">${c.progress_percent || 0}% complete</span>
+        </div>`;
+    });
+    html += `</div>`;
+
+    html += `
+    <h3 class="section-title">Practice Quiz</h3>
+    <div class="quiz-box">
+        <div class="quiz-controls">
+            <select id="quizCourseSelect" class="admin-select">
+                ${courses.map(c => `<option value="${c.id}">${c.code} - ${c.title}</option>`).join("")}
+            </select>
+            <button type="button" class="btn-login" id="generateQuizBtn" style="width:auto;padding:10px 18px;">Generate Practice Quiz</button>
+        </div>
+        <div id="quizArea"></div>
+    </div>`;
+
+    roleContent.innerHTML = html;
+
+    const generateBtn = document.getElementById("generateQuizBtn");
+    if (generateBtn) generateBtn.addEventListener("click", generateQuiz);
+}
+
+let currentQuiz = { course_id: null, questions: [], answers: {} };
+
+async function generateQuiz() {
+    const courseId = document.getElementById("quizCourseSelect").value;
+    const quizArea = document.getElementById("quizArea");
+    quizArea.innerHTML = `<p class="quiz-status">Generating questions...</p>`;
     try {
-        const data = await authedGet("/api/academic/schedule");
-        const rows_ = data.schedule || [];
-        scheduleLoaded = true;
-        if (rows_.length === 0) {
-            wrap.innerHTML = `<div class="empty-state">No scheduled sections found.</div>`;
+        const res = await fetch(`${API_BASE}/api/quiz/generate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...authHeaders() },
+            body: JSON.stringify({ course_id: courseId })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            quizArea.innerHTML = `<p class="quiz-status error">${data.detail || "Could not generate quiz."}</p>`;
             return;
         }
-        const rows = rows_.map(s => {
-            const day = s.day != null ? s.day : "—";
-            const start = (s.start_hr != null) ? `${String(s.start_hr).padStart(2, "0")}:${String(s.start_min || 0).padStart(2, "0")}` : "—";
-            const end = (s.end_hr != null) ? `${String(s.end_hr).padStart(2, "0")}:${String(s.end_min || 0).padStart(2, "0")}` : "—";
-            const location = [s.building, s.room_number].filter(Boolean).join(" ");
-            return `
-                <tr>
-                    <td>${escapeHtml(s.course_id)}</td>
-                    <td>${escapeHtml(s.title || "—")}</td>
-                    <td>${escapeHtml(String(day))}</td>
-                    <td>${start} – ${end}</td>
-                    <td>${escapeHtml(location || "—")}</td>
-                </tr>
-            `;
-        }).join("");
-        wrap.innerHTML = `
-            <table class="data-table">
-                <thead><tr><th>Course</th><th>Title</th><th>Day</th><th>Time</th><th>Location</th></tr></thead>
-                <tbody>${rows}</tbody>
-            </table>
-        `;
+        currentQuiz = { course_id: courseId, questions: data.questions, answers: {} };
+        renderQuiz();
     } catch (err) {
-        if (err.message !== "Session expired") {
-            wrap.innerHTML = `<div class="empty-state">⚠️ Could not load your schedule right now.</div>`;
-        }
+        quizArea.innerHTML = `<p class="quiz-status error">⚠️ Could not reach the server.</p>`;
     }
 }
 
-function escapeHtml(text) {
-    if (text === null || text === undefined) return "";
-    return text.toString()
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
+function renderQuiz() {
+    const quizArea = document.getElementById("quizArea");
+    let html = "";
+    currentQuiz.questions.forEach((q, i) => {
+        html += `<div class="quiz-question"><p class="quiz-question-text">${i + 1}. ${q.question}</p>`;
+        q.options.forEach((opt, j) => {
+            html += `
+            <label class="quiz-option">
+                <input type="radio" name="q${i}" value="${j}">
+                ${opt}
+            </label>`;
+        });
+        html += `</div>`;
+    });
+    html += `<button type="button" class="btn-login" id="submitQuizBtn" style="width:auto;padding:10px 18px;">Submit Quiz</button>`;
+    quizArea.innerHTML = html;
+
+    currentQuiz.questions.forEach((_, i) => {
+        document.querySelectorAll(`input[name="q${i}"]`).forEach(radio => {
+            radio.addEventListener("change", (e) => {
+                currentQuiz.answers[i] = e.target.value;
+            });
+        });
+    });
+
+    document.getElementById("submitQuizBtn").addEventListener("click", submitQuiz);
 }
 
-/* ------------------------------------------------------------------ */
-/* AI chat panel                                                      */
-/* ------------------------------------------------------------------ */
+async function submitQuiz() {
+    const quizArea = document.getElementById("quizArea");
+    try {
+        const res = await fetch(`${API_BASE}/api/quiz/submit`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...authHeaders() },
+            body: JSON.stringify({ course_id: currentQuiz.course_id, answers: currentQuiz.answers })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            quizArea.innerHTML += `<p class="quiz-status error">${data.detail || "Could not submit quiz."}</p>`;
+            return;
+        }
+        quizArea.innerHTML = `<p class="quiz-status success">You scored ${data.correct}/${data.total} (${data.score}/10). This has been added to your grades.</p>`;
+        loadReport();
+    } catch (err) {
+        quizArea.innerHTML += `<p class="quiz-status error">⚠️ Could not reach the server.</p>`;
+    }
+}
+
+function renderInstructor(data) {
+    const courses = data.courses || [];
+    let html = `
+    <section class="info-card">
+        <div class="info-left">
+            <h2>👤 ${data.full_name || "—"}</h2>
+            <div class="info-stats">
+                <div class="stat-item"><span class="stat-label">Department:</span><span class="stat-value">${data.department || "—"}</span></div>
+                <div class="stat-item"><span class="stat-label">Courses Teaching:</span><span class="stat-value">${data.courses_teaching || 0}</span></div>
+                <div class="stat-item"><span class="stat-label">Total Students:</span><span class="stat-value">${data.total_students || 0}</span></div>
+                <div class="stat-item"><span class="stat-label">Average Class Grade:</span><span class="stat-value">${data.average_class_grade || 0}/100</span></div>
+            </div>
+        </div>
+    </section>
+    <h3 class="section-title">My Courses & Rosters</h3>`;
+
+    courses.forEach(c => {
+        html += `
+        <div class="course-card">
+            <div class="course-card-top">
+                <b>${c.code} - ${c.title}</b>
+                <span class="course-grade">${c.enrolled_count} students | avg ${c.average_grade}/100</span>
+            </div>
+            <table class="roster-table">
+                <thead><tr><th>Student</th><th>Final Grade</th></tr></thead>
+                <tbody>
+                    ${(c.roster || []).map(r => `<tr><td>${r.name}</td><td>${r.final_grade != null ? r.final_grade + "/100" : "No grade yet"}</td></tr>`).join("")}
+                </tbody>
+            </table>
+        </div>`;
+    });
+
+    roleContent.innerHTML = html;
+}
+
+function renderAdmin(data) {
+    const kpi = data.kpi || { calls_count: 0, total_tokens: 0, total_cost: 0, unique_users: [] };
+    const traces = data.traces || [];
+
+    let html = `
+    <section class="admin-kpi-grid">
+        <div class="admin-kpi-card"><div class="admin-kpi-label">📞 Total Calls</div><div class="admin-kpi-value">${kpi.calls_count}</div></div>
+        <div class="admin-kpi-card"><div class="admin-kpi-label">🔢 Total Tokens</div><div class="admin-kpi-value">${kpi.total_tokens}</div></div>
+        <div class="admin-kpi-card"><div class="admin-kpi-label">💰 Total Cost</div><div class="admin-kpi-value">$${kpi.total_cost.toFixed(4)}</div></div>
+        <div class="admin-kpi-card"><div class="admin-kpi-label">👥 Active Users</div><div class="admin-kpi-value">${kpi.unique_users.length}</div></div>
+    </section>
+    <h3 class="section-title">Recent Conversations</h3>
+    <section class="admin-trace-list">`;
+
+    traces.slice(0, 30).forEach(t => {
+        html += `
+        <div class="admin-trace-card">
+            <div class="admin-trace-top">
+                <span class="admin-trace-query">${t.query || ""}</span>
+                <span class="admin-trace-meta">${t.user_role || ""} - ${t.user_id || ""}</span>
+            </div>
+            <p>${t.response || ""}</p>
+        </div>`;
+    });
+
+    html += `</section>`;
+    if (data.status === "error") {
+        html = `<p class="quiz-status error">${data.error || "Observability data is not available."}</p>` + html;
+    }
+    roleContent.innerHTML = html;
+}
+
+function handleUnauthorized() {
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("current_user");
+    dashboardView.style.display = "none";
+    loginView.style.display = "block";
+}
+
 const aiAvatarBtn = document.getElementById("aiAvatarBtn");
 const aiPanel = document.getElementById("aiPanel");
 const aiCloseBtn = document.getElementById("aiCloseBtn");
 const aiMessages = document.getElementById("aiMessages");
 const aiInputBox = document.getElementById("aiInputBox");
 const aiSendBtn = document.getElementById("aiSendBtn");
-const aiVoiceBtn = document.getElementById("aiVoiceBtn");
-
-let mediaRecorder = null;
-let recordedChunks = [];
-let isRecording = false;
 
 if (aiAvatarBtn) {
     aiAvatarBtn.addEventListener("click", () => {
         aiPanel.classList.add("open");
         aiAvatarBtn.classList.add("hidden");
         if (aiMessages.children.length === 0) {
-            appendMessage("assistant", "Hi! I'm Kayfa AI 👋 Ask me about your grades, schedule, or anything about your studies.");
+            appendMessage("assistant", "أهلاً! أنا Kayfa AI 👋 اسألني عن دراستك أو أي حاجة تخص المنصة.");
         }
     });
 }
@@ -353,12 +338,17 @@ function appendMessage(role, text, sentiment = null) {
     if (sentiment) {
         const badge = document.createElement("div");
         badge.className = "sentiment-badge";
-        const label = (sentiment.label || "Unknown").toLowerCase();
+        const label = sentiment.label || "Unknown";
         const confidence = Number(sentiment.confidence || 0);
+
         let emoji = "⚪";
-        if (label === "positive") emoji = "🟢";
-        else if (label === "negative") emoji = "🔴";
-        badge.textContent = `${emoji} ${sentiment.label || "Unknown"} (${Math.round(confidence * 100)}%)`;
+        let textLabel = label;
+
+        if (label.toLowerCase() === "positive") { emoji = "🟢"; textLabel = "إيجابي"; }
+        else if (label.toLowerCase() === "negative") { emoji = "🔴"; textLabel = "سلبي"; }
+        else if (label.toLowerCase() === "neutral") { emoji = "⚪"; textLabel = "محايد"; }
+
+        badge.textContent = `${emoji} ${textLabel} (${Math.round(confidence * 100)}%)`;
         wrapper.appendChild(badge);
     }
 
@@ -371,180 +361,61 @@ async function sendMessage() {
     const text = aiInputBox.value.trim();
     if (!text) return;
 
-    const token = localStorage.getItem("access_token");
-    if (!token) {
-        appendMessage("assistant", "⚠️ Your session has expired. Please sign in again.");
+    if (!localStorage.getItem("access_token")) {
+        appendMessage("assistant", "⚠️ Your session expired. Please log in again.");
         return;
     }
 
     appendMessage("user", text);
     aiInputBox.value = "";
 
-    const typingWrapper = appendMessage("typing", "Typing…");
-    typingWrapper.parentElement.classList.add("typing");
+    const typingEl = appendMessage("typing", "بيكتب...");
+    typingEl.classList.add("typing");
 
     try {
         const res = await fetch(`${API_BASE}/api/chat`, {
             method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${token}`
-            },
+            headers: { "Content-Type": "application/json", ...authHeaders() },
             body: JSON.stringify({ query: text, history: chatHistory.slice(-6) })
         });
         const data = await res.json();
 
-        typingWrapper.parentElement.remove();
+        typingEl.remove();
 
         if (!res.ok) {
-            if (res.status === 401) {
-                localStorage.removeItem("access_token");
-                localStorage.removeItem("current_user");
-                appendMessage("assistant", "⚠️ Your session has expired. Please sign in again.");
-                return;
-            }
-            appendMessage("assistant", data.detail || "Sorry, something went wrong with that reply.");
+            if (res.status === 401) return handleUnauthorized();
+            appendMessage("assistant", data.detail || "معلش، حصل خطأ في الرد.");
             return;
         }
 
-        appendMessage("assistant", data.response || "Sorry, something went wrong with that reply.", data.sentiment || null);
+        appendMessage("assistant", data.response || "معلش، حصل خطأ في الرد.", data.sentiment || null);
 
         chatHistory.push({ role: "user", content: text });
         chatHistory.push({ role: "assistant", content: data.response || "" });
     } catch (err) {
-        if (typingWrapper && typingWrapper.parentElement) typingWrapper.parentElement.remove();
-        appendMessage("assistant", "⚠️ Could not reach the AI server. Make sure the API is running.");
+        if (typingEl && typingEl.parentNode) typingEl.remove();
+        appendMessage("assistant", "⚠️ تعذر الاتصال بالـ AI server.");
     }
 }
 
 if (aiSendBtn) aiSendBtn.addEventListener("click", sendMessage);
 if (aiInputBox) {
     aiInputBox.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") {
-            e.preventDefault();
-            sendMessage();
-        }
+        if (e.key === "Enter") { e.preventDefault(); sendMessage(); }
     });
 }
 
-async function sendAudioToAI(blob) {
-    const token = localStorage.getItem("access_token");
-    if (!token) {
-        appendMessage("assistant", "⚠️ Your session has expired. Please sign in again.");
-        return;
-    }
-
-    const typingWrapper = appendMessage("typing", "Listening and transcribing…");
-    typingWrapper.parentElement.classList.add("typing");
-
-    try {
-        const formData = new FormData();
-        formData.append("file", blob, "voice-recording.webm");
-
-        const res = await fetch(`${API_BASE}/api/chat/audio`, {
-            method: "POST",
-            headers: { "Authorization": `Bearer ${token}` },
-            body: formData
-        });
-
-        const data = await res.json();
-        typingWrapper.parentElement.remove();
-
-        if (!res.ok) {
-            if (res.status === 401) {
-                localStorage.removeItem("access_token");
-                localStorage.removeItem("current_user");
-                appendMessage("assistant", "⚠️ Your session has expired. Please sign in again.");
-                return;
-            }
-            appendMessage("assistant", data.detail || "Could not process the audio.");
-            return;
-        }
-
-        appendMessage("assistant", data.response || "Sorry, something went wrong with that reply.", data.sentiment || null);
-        chatHistory.push({ role: "user", content: "[audio_message]" });
-        chatHistory.push({ role: "assistant", content: data.response || "" });
-    } catch (err) {
-        if (typingWrapper && typingWrapper.parentElement) typingWrapper.parentElement.remove();
-        appendMessage("assistant", "⚠️ Could not send the audio to the server.");
-    }
-}
-
-async function toggleVoiceRecording() {
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        appendMessage("assistant", "⚠️ This browser does not support voice recording.");
-        return;
-    }
-
-    if (isRecording) {
-        if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop();
-        isRecording = false;
-        if (aiVoiceBtn) {
-            aiVoiceBtn.classList.remove("is-recording");
-            aiVoiceBtn.textContent = "🎙️";
-            aiVoiceBtn.setAttribute("aria-label", "Record voice");
-        }
-        return;
-    }
-
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const mimeType = MediaRecorder.isTypeSupported("audio/wav;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
-        mediaRecorder = new MediaRecorder(stream, { mimeType });
-        recordedChunks = [];
-
-        mediaRecorder.ondataavailable = (event) => {
-            if (event.data.size > 0) recordedChunks.push(event.data);
-        };
-
-        mediaRecorder.onstop = async () => {
-            const audioBlob = new Blob(recordedChunks, { type: mimeType });
-            stream.getTracks().forEach((track) => track.stop());
-            if (audioBlob.size > 0) await sendAudioToAI(audioBlob);
-        };
-
-        mediaRecorder.start();
-        isRecording = true;
-        if (aiVoiceBtn) {
-            aiVoiceBtn.classList.add("is-recording");
-            aiVoiceBtn.textContent = "■";
-            aiVoiceBtn.setAttribute("aria-label", "Stop recording");
-        }
-
-        appendMessage("assistant", "🎙️ Recording… tap again to stop and send.");
-    } catch (err) {
-        console.error("Microphone access error:", err);
-        appendMessage("assistant", "⚠️ Could not access the microphone. Check your browser permissions.");
-    }
-}
-
-if (aiVoiceBtn) aiVoiceBtn.addEventListener("click", toggleVoiceRecording);
-
-/* ------------------------------------------------------------------ */
-/* Logout / session restore                                           */
-/* ------------------------------------------------------------------ */
 const logoutBtn = document.getElementById("logoutBtn");
 if (logoutBtn) {
     logoutBtn.addEventListener("click", async () => {
-        const token = localStorage.getItem("access_token");
         try {
-            if (token) {
-                await fetch(`${API_BASE}/api/auth/logout`, {
-                    method: "POST",
-                    headers: { "Authorization": `Bearer ${token}` }
-                });
-            }
-        } catch (err) {
-            console.error("Logout error:", err);
-        }
+            await fetch(`${API_BASE}/api/auth/logout`, { method: "POST", headers: authHeaders() });
+        } catch (err) { console.error("Logout error:", err); }
 
         localStorage.removeItem("access_token");
         localStorage.removeItem("current_user");
-
         currentUser = { id: null, role: null, name: null };
         chatHistory = [];
-        gradesLoaded = false;
-        scheduleLoaded = false;
 
         dashboardView.style.display = "none";
         loginView.style.display = "block";
@@ -556,32 +427,16 @@ if (logoutBtn) {
 async function restoreSession() {
     const token = localStorage.getItem("access_token");
     if (!token) return;
-
     try {
-        const res = await fetch(`${API_BASE}/api/auth/me`, {
-            method: "GET",
-            headers: { "Authorization": `Bearer ${token}` }
-        });
-
-        if (!res.ok) {
-            localStorage.removeItem("access_token");
-            localStorage.removeItem("current_user");
-            return;
-        }
+        const res = await fetch(`${API_BASE}/api/auth/me`, { headers: authHeaders() });
+        if (!res.ok) return handleUnauthorized();
 
         const data = await res.json();
-        const userInfo = data.user;
-        const storedUser = JSON.parse(localStorage.getItem("current_user") || "{}");
-
-        currentUser = {
-            id: storedUser.id || userInfo.student_id || userInfo.instructor_id,
-            role: storedUser.role || "Student",
-            name: storedUser.name || userInfo.name
-        };
-        populateDashboard({ ...userInfo, ...storedUser, id: currentUser.id, role: currentUser.role, name: currentUser.name });
-        showView("home");
+        currentUser = { id: data.user.id, role: data.user.role, name: data.user.name };
+        populateNav(data.user);
         loginView.style.display = "none";
         dashboardView.style.display = "block";
+        loadReport();
     } catch (err) {
         console.error("Session restore error:", err);
     }
