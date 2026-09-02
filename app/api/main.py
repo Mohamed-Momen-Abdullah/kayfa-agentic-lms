@@ -1,3 +1,4 @@
+import io
 import os
 import sqlite3
 import pandas as pd
@@ -7,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-
+from pydub import AudioSegment
 from app.core.security import (
     create_access_token, get_current_user,
     create_admin_token, get_current_admin,
@@ -17,13 +18,41 @@ from app.data.connector import USER_INDEX, DB_PATH
 from app.agents.supervisor import MCPClient
 from app.observability.tracing import _fetch_langfuse_dashboard_data
 from app.services.speech import transcribe_audio_bytes
+import subprocess
+import imageio_ffmpeg
 
+def convert_webm_to_wav(audio_bytes: bytes) -> bytes:
+    ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
+    
+    # Run ffmpeg as a subprocess reading from stdin and writing to stdout
+    process = subprocess.Popen(
+        [
+            ffmpeg_path,
+            "-i", "pipe:0",          # Read from stdin
+            "-f", "wav",             # Force WAV container
+            "-acodec", "pcm_s16le",  # 16-bit PCM codec
+            "-ar", "16000",          # 16kHz sample rate
+            "-ac", "1",              # Mono
+            "pipe:1"                 # Output to stdout
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
+    )
+    
+    wav_bytes, stderr = process.communicate(input=audio_bytes)
+    
+    if process.returncode != 0:
+        raise RuntimeError(f"FFmpeg conversion error: {stderr.decode()}")
+        
+    return wav_bytes
 
 app = FastAPI(title="Kayfa Agentic LMS API", version="2.0.0")
 
+# 1. FIX: Avoid combining '*' origins with allow_credentials=True
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:8000", "http://127.0.0.1:8000", "*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -49,9 +78,12 @@ class AdminLoginRequest(BaseModel):
     email: str
     password: str
 
-# Authentication
+# -------------------------------------------------------------------
+# Authentication & User Endpoints
+# -------------------------------------------------------------------
+# FIX: Changed to standard 'def' so blocking SQLite calls run in threadpool
 @app.post("/api/auth/login")
-async def login(req: LoginRequest):
+def login(req: LoginRequest):
     user_id = req.user_id.strip()
     role = req.role.strip()
 
@@ -59,15 +91,18 @@ async def login(req: LoginRequest):
     if not user_info:
         raise HTTPException(status_code=401, detail="User ID not found in database.")
 
-    # Calculate actual GPA from takes table
+    # Calculate actual GPA from takes table using direct cursor
     gpa = 3.4
     if os.path.exists(DB_PATH):
         try:
             conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
             grade_map = {"A": 4.0, "A-": 3.7, "B+": 3.3, "B": 3.0, "B-": 2.7, "C+": 2.3, "C": 2.0, "F": 0.0}
-            df_g = pd.read_sql("SELECT grade FROM takes WHERE ID = ?", conn, params=[user_id])
+            cursor.execute("SELECT grade FROM takes WHERE ID = ?", (user_id,))
+            rows = cursor.fetchall()
             conn.close()
-            valid_grades = [grade_map[g] for g in df_g['grade'].dropna() if g in grade_map]
+
+            valid_grades = [grade_map[row[0]] for row in rows if row[0] in grade_map]
             if valid_grades:
                 gpa = round(sum(valid_grades) / len(valid_grades), 2)
         except Exception:
@@ -94,6 +129,10 @@ async def login(req: LoginRequest):
 async def me(current_user=Depends(get_current_user)):
     return {"user": current_user["user_info"]}
 
+# -------------------------------------------------------------------
+# Chat & Audio Endpoints
+# -------------------------------------------------------------------
+
 @app.post("/api/chat")
 async def chat(req: ChatRequest, current_user=Depends(get_current_user)):
     user_id = current_user["user_id"]
@@ -117,7 +156,8 @@ async def chat_audio(
 ):
     user_id = current_user["user_id"]
     user_role = current_user["role"]
-
+    print(f"Received audio file: {file.filename} from user {user_id} ({user_role})")
+    
     if not file or not file.filename:
         raise HTTPException(status_code=400, detail="Audio file is required.")
 
@@ -125,10 +165,22 @@ async def chat_audio(
     if not audio_bytes:
         raise HTTPException(status_code=400, detail="Uploaded audio is empty.")
 
+    # Step 1: Auto-convert incoming audio to 16kHz mono WAV
     try:
-        transcript = transcribe_audio_bytes(audio_bytes, sample_rate=16000)
+        processed_audio_bytes = convert_webm_to_wav(audio_bytes)
+    except Exception as conv_exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to process or convert audio file format: {conv_exc}"
+        ) from conv_exc
+    # Step 2: Pass converted 16kHz WAV bytes to your transcription pipeline
+    try:
+        transcript = transcribe_audio_bytes(processed_audio_bytes, sample_rate=16000)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Audio transcription failed: {exc}") from exc
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Audio transcription failed. Details: {exc}"
+        ) from exc
 
     if not transcript.strip():
         raise HTTPException(status_code=400, detail="No text was recognized from the audio.")
@@ -139,51 +191,62 @@ async def chat_audio(
         user_role=user_role,
         history=[]
     )
+# -------------------------------------------------------------------
+# Direct Academic Data Endpoints
+# -------------------------------------------------------------------
 
-# Direct Academic Data Endpoints for UI Tabs
+# FIX: Changed route signatures to standard 'def' to handle DB I/O off-thread
 @app.get("/api/academic/grades")
-async def get_grades(current_user=Depends(get_current_user)):
+def get_grades(current_user=Depends(get_current_user)):
     user_id = current_user["user_id"]
     if not os.path.exists(DB_PATH):
         return {"grades": []}
+    
     conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql("""
+    query = """
         SELECT t.course_id, c.title, c.credits, t.semester, t.year, t.grade
         FROM takes t
         JOIN course c ON t.course_id = c.course_id
         WHERE t.ID = ?
         ORDER BY t.year DESC, t.semester
-    """, conn, params=[user_id])
+    """
+    df = pd.read_sql_query(query, conn, params=(user_id,))
     conn.close()
     return {"grades": df.to_dict(orient="records")}
 
 @app.get("/api/academic/schedule")
-async def get_schedule(current_user=Depends(get_current_user)):
+def get_schedule(current_user=Depends(get_current_user)):
     user_id = current_user["user_id"]
     if not os.path.exists(DB_PATH):
         return {"schedule": []}
+    
     conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql("""
+    query = """
         SELECT t.course_id, c.title, s.building, s.room_number, ts.day, ts.start_hr, ts.start_min, ts.end_hr, ts.end_min
         FROM takes t
         JOIN course c ON t.course_id = c.course_id
         JOIN section s ON t.course_id = s.course_id AND t.sec_id = s.sec_id AND t.semester = s.semester AND t.year = s.year
         LEFT JOIN time_slot ts ON s.time_slot_id = ts.time_slot_id
         WHERE t.ID = ?
-    """, conn, params=[user_id])
+    """
+    df = pd.read_sql_query(query, conn, params=(user_id,))
     conn.close()
     return {"schedule": df.to_dict(orient="records")}
 
 @app.get("/api/academic/courses")
-async def get_courses(current_user=Depends(get_current_user)):
+def get_courses(current_user=Depends(get_current_user)):
     if not os.path.exists(DB_PATH):
         return {"courses": []}
+    
     conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql("SELECT course_id, title, dept_name, credits FROM course LIMIT 50", conn)
+    df = pd.read_sql_query("SELECT course_id, title, dept_name, credits FROM course LIMIT 50", conn)
     conn.close()
     return {"courses": df.to_dict(orient="records")}
 
-# Admin Observability
+# -------------------------------------------------------------------
+# Admin Endpoints & Static Files
+# -------------------------------------------------------------------
+
 @app.post("/api/admin/login")
 async def admin_login(req: AdminLoginRequest):
     if req.email.strip().lower() != ADMIN_EMAIL.lower() or req.password != ADMIN_PASSWORD:
@@ -199,7 +262,6 @@ async def admin_dashboard(current_admin=Depends(get_current_admin)):
     data = _fetch_langfuse_dashboard_data(limit=100)
     return data
 
-# Static Mounts & HTML Templates
 app.mount("/static", StaticFiles(directory="frontend/static"), name="static")
 
 @app.get("/")
