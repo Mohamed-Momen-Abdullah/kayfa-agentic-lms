@@ -30,6 +30,10 @@ ROLE_PERMISSIONS = {
         ],
         "welcome_msg": "مرحباً يا دكتور! 👨‍🏫 كيف يمكنني دعم مقرراتك وجدولك الأكاديمي اليوم؟",
     },
+    "Admin": {
+        "allowed_agents": ["Course_Agent", "Policy_Agent"],
+        "welcome_msg": "أهلاً أدمن، إزاي أقدر أساعدك؟",
+    },
 }
 
 AGENT_DESCRIPTIONS = {
@@ -42,16 +46,10 @@ AGENT_DESCRIPTIONS = {
 }
 
 DATABASE_CONTEXT = """
-DATA STRUCTURE (university.db):
-- student(ID, name, dept_name, tot_cred)
-- instructor(ID, name, dept_name, salary)
-- department(dept_name, building, budget)
-- course(course_id, title, dept_name, credits)
-- classroom(building, room_number, capacity)
-- section(course_id, sec_id, semester, year, building, room_number, time_slot_id)
-- takes(ID, course_id, sec_id, semester, year, grade)
-- teaches(ID, course_id, sec_id, semester, year)
-- advisor(s_ID, i_ID)
-- prereq(course_id, prereq_id)
-- time_slot(time_slot_id, day, start_hr, start_min, end_hr, end_min)
+DATA STRUCTURE (MongoDB - database: edumind):
+- users(_id, full_name, email, username, password_hash, role[student|instructor], department, enrolled_courses[], teaching_courses[])
+- courses(_id, code, title, description, category, level, instructor_id)
+- lessons(_id, course_id, title, order, content)
+- enrollments(student_id, course_id, progress_percent, status)
+- grades(student_id, course_id, assignments[], attendance_percent, final_grade)
 """

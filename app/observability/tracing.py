@@ -4,9 +4,9 @@ from langfuse import Langfuse
 from langfuse.llama_index import LlamaIndexCallbackHandler
 from llama_index.core.callbacks import CallbackManager
 
-LANGFUSE_HOST = "https://us.cloud.langfuse.com"
-LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY", "pk-lf-d5ec3773-fab8-4872-8bbb-219dbffe63b3")
-LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY", "sk-lf-74f7c81c-3fa8-481b-96e5-b60c1364c629")
+LANGFUSE_HOST = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
+LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY", "")
+LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY", "")
 
 lf = None
 callback_manager = None
