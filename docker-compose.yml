@@ -1,17 +1,27 @@
-version: "3.9"
-
 services:
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: kayfa-agentic-lms
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - kayfa_mongo_data:/data/db
+
+  app:
+    build: .
+    restart: unless-stopped
     ports:
       - "8000:8000"
     environment:
-      PYTHONUNBUFFERED: "1"
-      PORT: "8000"
-    volumes:
-      - .:/app
-    command: uvicorn app.api.main:app --host 0.0.0.0 --port 8000
-    restart: unless-stopped
+      MONGO_URI: mongodb://mongo:27017
+      DATABASE_NAME: kayfa_db
+      JWT_SECRET: ${JWT_SECRET:-dev-only-secret-change-me}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-llama-3.1-8b-instant}
+    depends_on:
+      - mongo
+
+volumes:
+  kayfa_mongo_data:

@@ -1,273 +1,526 @@
-import io
-import os
-import sqlite3
-import pandas as pd
-from typing import Optional, List
-from fastapi import FastAPI, HTTPException, Depends, Request, UploadFile, File
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+import logging
+import uuid
+from pathlib import Path
+
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, BackgroundTasks
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
-from pydub import AudioSegment
-from app.core.security import (
-    create_access_token, get_current_user,
-    create_admin_token, get_current_admin,
-    ADMIN_EMAIL, ADMIN_PASSWORD, ACCESS_TOKEN_EXPIRE_MINUTES, ADMIN_TOKEN_EXPIRE_MINUTES
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
+from app.agents.quiz_agent import (
+    generate_quiz_from_material,
+    grade_quiz,
+    generate_improvement_plan,
+    refine_quiz_experience,
+    quiz_memory,
+    quiz_refiner,
 )
-from app.data.connector import USER_INDEX, DB_PATH
-from app.agents.supervisor import MCPClient
-from app.observability.tracing import _fetch_langfuse_dashboard_data
-from app.services.speech import transcribe_audio_bytes
-import subprocess
-import imageio_ffmpeg
-
-def convert_webm_to_wav(audio_bytes: bytes) -> bytes:
-    ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
-    
-    # Run ffmpeg as a subprocess reading from stdin and writing to stdout
-    process = subprocess.Popen(
-        [
-            ffmpeg_path,
-            "-i", "pipe:0",          # Read from stdin
-            "-f", "wav",             # Force WAV container
-            "-acodec", "pcm_s16le",  # 16-bit PCM codec
-            "-ar", "16000",          # 16kHz sample rate
-            "-ac", "1",              # Mono
-            "pipe:1"                 # Output to stdout
-        ],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE
-    )
-    
-    wav_bytes, stderr = process.communicate(input=audio_bytes)
-    
-    if process.returncode != 0:
-        raise RuntimeError(f"FFmpeg conversion error: {stderr.decode()}")
-        
-    return wav_bytes
-
-app = FastAPI(title="Kayfa Agentic LMS API", version="2.0.0")
-
-# 1. FIX: Avoid combining '*' origins with allow_credentials=True
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:8000", "http://127.0.0.1:8000", "*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+from app.agents.academic_agent import academic_memory, academic_refiner
+from app.agents.supervisor import route_chat_message
+from app.agents.planner import build_intervention_plan, execute_intervention_plan
+from app.core.config import settings
+from app.core.security import authenticate, create_access_token, get_current_user
+from app.db.connector import (
+    get_course,
+    get_courses_for_student,
+    get_instructor_report,
+    get_student_report,
+    get_personal_records,
+    add_quiz_grade,
+    get_admin_overview,
+    get_chat_history,
+    get_latest_intervention_plan,
+    get_instructor_alerts,
 )
+from app.services.tracing import log_chat_trace
+from app.services.voice import transcribe_audio
 
-client = MCPClient()
 
-# Request Models
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+FRONTEND_DIR = BASE_DIR / "frontend"
+
+app = FastAPI(title=settings.PROJECT_NAME)
+
+
+# In-memory store for "currently open" quizzes, keyed by a one-time token.
+# Final scored results are persisted to MongoDB via add_quiz_grade —
+# this cache only needs to survive between "generate" and "submit"
+# for one quiz.
+_ACTIVE_QUIZZES: dict[str, dict] = {}
+
+
+# ------------------------------------------------------------------ #
+# Schemas
+# ------------------------------------------------------------------ #
 class LoginRequest(BaseModel):
-    user_id: str
+    username: str
     password: str
-    role: str
+
 
 class ChatMessage(BaseModel):
     role: str
     content: str
 
+
 class ChatRequest(BaseModel):
     query: str
-    history: Optional[List[ChatMessage]] = None
+    history: list[ChatMessage] = []
 
-class AdminLoginRequest(BaseModel):
-    email: str
-    password: str
 
-# -------------------------------------------------------------------
-# Authentication & User Endpoints
-# -------------------------------------------------------------------
-# FIX: Changed to standard 'def' so blocking SQLite calls run in threadpool
+class QuizGenerateRequest(BaseModel):
+    course_id: str
+
+
+class QuizSubmitRequest(BaseModel):
+    quiz_token: str
+    answers: dict
+
+
+# ------------------------------------------------------------------ #
+# Auth
+# ------------------------------------------------------------------ #
 @app.post("/api/auth/login")
-def login(req: LoginRequest):
-    user_id = req.user_id.strip()
-    role = req.role.strip()
+def login(payload: LoginRequest):
+    user = authenticate(
+        payload.username,
+        payload.password,
+    )
 
-    user_info = USER_INDEX.get(f"{role}:{user_id}")
-    if not user_info:
-        raise HTTPException(status_code=401, detail="User ID not found in database.")
+    if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid username, password, or role.",
+        )
 
-    # Calculate actual GPA from takes table using direct cursor
-    gpa = 3.4
-    if os.path.exists(DB_PATH):
-        try:
-            conn = sqlite3.connect(DB_PATH)
-            cursor = conn.cursor()
-            grade_map = {"A": 4.0, "A-": 3.7, "B+": 3.3, "B": 3.0, "B-": 2.7, "C+": 2.3, "C": 2.0, "F": 0.0}
-            cursor.execute("SELECT grade FROM takes WHERE ID = ?", (user_id,))
-            rows = cursor.fetchall()
-            conn.close()
+    token = create_access_token(
+        user["id"],
+        user["role"],
+    )
 
-            valid_grades = [grade_map[row[0]] for row in rows if row[0] in grade_map]
-            if valid_grades:
-                gpa = round(sum(valid_grades) / len(valid_grades), 2)
-        except Exception:
-            pass
-
-    token = create_access_token(user_id=user_id, role=role)
     return {
         "access_token": token,
         "token_type": "bearer",
-        "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-        "user": {
-            "id": user_id,
-            "role": role,
-            "name": user_info.get("name"),
-            "dept_name": user_info.get("dept_name"),
-            "tot_cred": user_info.get("tot_cred", 0),
-            "gpa": gpa,
-            "advisor": "Dr. Ahmed Mansour",
-            "semester": "Fall 2026"
+        "user": user,
+    }
+
+
+@app.get("/api/auth/me")
+def me(current=Depends(get_current_user)):
+    return current["user_info"]
+
+
+@app.post("/api/auth/logout")
+def logout(current=Depends(get_current_user)):
+    # JWTs are stateless here; logout is handled client-side by discarding
+    # the token. This endpoint exists so the frontend has a clean call to
+    # make and a natural place to add token revocation later if needed.
+    return {"status": "ok"}
+
+
+# ------------------------------------------------------------------ #
+# Reports (role-aware)
+# ------------------------------------------------------------------ #
+def _self_refining_stats() -> dict:
+    """Diagnostics for the admin dashboard: how much each self-refining
+    agent has learned from, how often refinement has actually fired, and
+    what it currently believes. Mirrors /api/debug/strategy but covers
+    both agents in one place."""
+    return {
+        "academic_agent": {
+            "experiences_recorded": academic_memory.total_seen,
+            "refinements_triggered": academic_refiner.refinement_count,
+            "last_refined_at": academic_refiner.last_refined_at,
+            "current_strategy": academic_refiner.get_strategy(),
+        },
+        "quiz_agent": {
+            "experiences_recorded": quiz_memory.total_seen,
+            "refinements_triggered": quiz_refiner.refinement_count,
+            "last_refined_at": quiz_refiner.last_refined_at,
+            "current_strategy": quiz_refiner.get_strategy(),
         },
     }
 
-@app.get("/api/auth/me")
-async def me(current_user=Depends(get_current_user)):
-    return {"user": current_user["user_info"]}
 
-# -------------------------------------------------------------------
-# Chat & Audio Endpoints
-# -------------------------------------------------------------------
+@app.get("/api/report")
+def report(current=Depends(get_current_user)):
+    role = current["role"]
+    user_id = current["user_id"]
 
+    if role == "Student":
+        return get_student_report(user_id)
+
+    if role == "Instructor":
+        return get_instructor_report(user_id)
+
+    if role == "Admin":
+        overview = get_admin_overview()
+        overview["self_refining"] = _self_refining_stats()
+        return overview
+
+    raise HTTPException(
+        status_code=400,
+        detail="Unknown role.",
+    )
+
+
+@app.get("/api/courses")
+def my_courses(current=Depends(get_current_user)):
+    if current["role"] != "Student":
+        raise HTTPException(
+            status_code=403,
+            detail="Only students have enrolled courses.",
+        )
+
+    courses = get_courses_for_student(
+        current["user_id"]
+    )
+
+    return [
+        {
+            "id": c["_id"],
+            "code": c.get("code", ""),
+            "title": c.get("title", ""),
+        }
+        for c in courses
+    ]
+
+
+# ------------------------------------------------------------------ #
+# Chat (Academic Help Agent + Quiz Agent, routed by the supervisor)
+# ------------------------------------------------------------------ #
 @app.post("/api/chat")
-async def chat(req: ChatRequest, current_user=Depends(get_current_user)):
-    user_id = current_user["user_id"]
-    user_role = current_user["role"]
-    query = req.query.strip()
-    if not query:
-        raise HTTPException(status_code=400, detail="Query cannot be empty.")
-
-    clean_history = [{"role": m.role, "content": m.content} for m in (req.history or [])]
-    return await client.process_query_for_api(
-        query=query,
-        user_id=user_id,
-        user_role=user_role,
-        history=clean_history
-    )
-
-@app.post("/api/chat/audio")
-async def chat_audio(
-    file: UploadFile = File(...),
-    current_user=Depends(get_current_user)
+async def chat(
+    payload: ChatRequest,
+    current=Depends(get_current_user),
 ):
-    user_id = current_user["user_id"]
-    user_role = current_user["role"]
-    print(f"Received audio file: {file.filename} from user {user_id} ({user_role})")
-    
-    if not file or not file.filename:
-        raise HTTPException(status_code=400, detail="Audio file is required.")
+    role = current["role"]
+    user_id = current["user_id"]
 
-    audio_bytes = await file.read()
-    if not audio_bytes:
-        raise HTTPException(status_code=400, detail="Uploaded audio is empty.")
-
-    # Step 1: Auto-convert incoming audio to 16kHz mono WAV
-    try:
-        processed_audio_bytes = convert_webm_to_wav(audio_bytes)
-    except Exception as conv_exc:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Failed to process or convert audio file format: {conv_exc}"
-        ) from conv_exc
-    # Step 2: Pass converted 16kHz WAV bytes to your transcription pipeline
-    try:
-        transcript = transcribe_audio_bytes(processed_audio_bytes, sample_rate=16000)
-    except Exception as exc:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Audio transcription failed. Details: {exc}"
-        ) from exc
-
-    if not transcript.strip():
-        raise HTTPException(status_code=400, detail="No text was recognized from the audio.")
-
-    return await client.process_query_for_api(
-        query=transcript.strip(),
-        user_id=user_id,
-        user_role=user_role,
-        history=[]
+    course_context = get_personal_records(
+        role,
+        user_id,
     )
-# -------------------------------------------------------------------
-# Direct Academic Data Endpoints
-# -------------------------------------------------------------------
 
-# FIX: Changed route signatures to standard 'def' to handle DB I/O off-thread
-@app.get("/api/academic/grades")
-def get_grades(current_user=Depends(get_current_user)):
-    user_id = current_user["user_id"]
-    if not os.path.exists(DB_PATH):
-        return {"grades": []}
-    
-    conn = sqlite3.connect(DB_PATH)
-    query = """
-        SELECT t.course_id, c.title, c.credits, t.semester, t.year, t.grade
-        FROM takes t
-        JOIN course c ON t.course_id = c.course_id
-        WHERE t.ID = ?
-        ORDER BY t.year DESC, t.semester
-    """
-    df = pd.read_sql_query(query, conn, params=(user_id,))
-    conn.close()
-    return {"grades": df.to_dict(orient="records")}
+    history = [
+        m.model_dump()
+        for m in payload.history
+    ]
 
-@app.get("/api/academic/schedule")
-def get_schedule(current_user=Depends(get_current_user)):
-    user_id = current_user["user_id"]
-    if not os.path.exists(DB_PATH):
-        return {"schedule": []}
-    
-    conn = sqlite3.connect(DB_PATH)
-    query = """
-        SELECT t.course_id, c.title, s.building, s.room_number, ts.day, ts.start_hr, ts.start_min, ts.end_hr, ts.end_min
-        FROM takes t
-        JOIN course c ON t.course_id = c.course_id
-        JOIN section s ON t.course_id = s.course_id AND t.sec_id = s.sec_id AND t.semester = s.semester AND t.year = s.year
-        LEFT JOIN time_slot ts ON s.time_slot_id = ts.time_slot_id
-        WHERE t.ID = ?
-    """
-    df = pd.read_sql_query(query, conn, params=(user_id,))
-    conn.close()
-    return {"schedule": df.to_dict(orient="records")}
+    result = await route_chat_message(
+        payload.query,
+        role,
+        course_context=course_context,
+        history=history,
+    )
 
-@app.get("/api/academic/courses")
-def get_courses(current_user=Depends(get_current_user)):
-    if not os.path.exists(DB_PATH):
-        return {"courses": []}
-    
-    conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query("SELECT course_id, title, dept_name, credits FROM course LIMIT 50", conn)
-    conn.close()
-    return {"courses": df.to_dict(orient="records")}
+    log_chat_trace(
+        user_id=user_id,
+        user_role=role,
+        query=payload.query,
+        response=result["response"],
+        agent=result["agent"],
+        sentiment=result["sentiment"],
+        usage=result.get("usage"),
+    )
 
-# -------------------------------------------------------------------
-# Admin Endpoints & Static Files
-# -------------------------------------------------------------------
-
-@app.post("/api/admin/login")
-async def admin_login(req: AdminLoginRequest):
-    if req.email.strip().lower() != ADMIN_EMAIL.lower() or req.password != ADMIN_PASSWORD:
-        raise HTTPException(status_code=401, detail="Invalid admin credentials.")
     return {
-        "access_token": create_admin_token(ADMIN_EMAIL),
-        "token_type": "bearer",
-        "expires_in": ADMIN_TOKEN_EXPIRE_MINUTES * 60,
+        "response": result["response"],
+        "agent": result["agent"],
+        "sentiment": result["sentiment"],
     }
 
-@app.get("/api/admin/dashboard")
-async def admin_dashboard(current_admin=Depends(get_current_admin)):
-    data = _fetch_langfuse_dashboard_data(limit=100)
-    return data
 
-app.mount("/static", StaticFiles(directory="frontend/static"), name="static")
+@app.get("/api/chat/history")
+def chat_history(current=Depends(get_current_user)):
+    """Returns this signed-in user's own past conversation with the chat
+    agents (never anyone else's), so the frontend can restore it after a
+    fresh login instead of starting empty every time."""
+    return {"messages": get_chat_history(current["user_id"])}
+
+
+# ------------------------------------------------------------------ #
+# Intervention planner (at-risk students)
+# ------------------------------------------------------------------ #
+async def _run_planner_background(student_id: str):
+    """Fired after events that can reveal a new risk signal (currently:
+    quiz submission). Detects, plans, AND executes — so instructor
+    alerts and the persisted plan are ready by the time anyone looks,
+    without making the triggering request wait on it."""
+    try:
+        plan = await build_intervention_plan(student_id)
+        if plan.get("steps"):
+            await execute_intervention_plan(student_id, plan)
+    except Exception:
+        logging.getLogger(__name__).error(
+            "Background intervention planner run failed for %s", student_id, exc_info=True
+        )
+
+
+@app.post("/api/planner/run")
+async def planner_run(current=Depends(get_current_user)):
+    """On-demand: student (or something acting on their behalf) asks
+    'am I falling behind, and if so what should I do about it' and
+    gets the plan run synchronously, with results included."""
+    if current["role"] != "Student":
+        raise HTTPException(status_code=403, detail="Only students have an intervention plan.")
+
+    plan = await build_intervention_plan(current["user_id"])
+    result = await execute_intervention_plan(current["user_id"], plan)
+    return result
+
+
+@app.get("/api/planner/latest")
+def planner_latest(current=Depends(get_current_user)):
+    if current["role"] != "Student":
+        raise HTTPException(status_code=403, detail="Only students have an intervention plan.")
+
+    plan = get_latest_intervention_plan(current["user_id"])
+    return plan or {"status": "none", "signals": [], "steps": [], "summary": "No plan run yet."}
+
+
+@app.get("/api/planner/alerts")
+def planner_alerts(current=Depends(get_current_user)):
+    """Unresolved at-risk alerts the planner raised for this
+    instructor's students."""
+    if current["role"] != "Instructor":
+        raise HTTPException(status_code=403, detail="Only instructors have student alerts.")
+
+    return {"alerts": get_instructor_alerts(current["user_id"])}
+
+
+# ------------------------------------------------------------------ #
+# Quiz Agent (formal, per-course quizzes)
+# ------------------------------------------------------------------ #
+@app.post("/api/quiz/generate")
+async def quiz_generate(
+    payload: QuizGenerateRequest,
+    current=Depends(get_current_user),
+):
+    if current["role"] != "Student":
+        raise HTTPException(
+            status_code=403,
+            detail="Only students can take quizzes.",
+        )
+
+    course = get_course(
+        payload.course_id
+    )
+
+    if not course:
+        raise HTTPException(
+            status_code=404,
+            detail="Course not found.",
+        )
+
+    questions, usage = await generate_quiz_from_material(
+        course.get("title", ""),
+        course.get("material", ""),
+        n=4,
+    )
+
+    quiz_token = str(uuid.uuid4())
+
+    _ACTIVE_QUIZZES[quiz_token] = {
+        "student_id": current["user_id"],
+        "course_id": payload.course_id,
+        "questions": questions,
+    }
+
+    log_chat_trace(
+        user_id=current["user_id"],
+        user_role="Student",
+        query=f"[quiz generated for {course.get('title')}]",
+        response=f"{len(questions)} questions generated.",
+        agent="quiz_agent",
+        sentiment=None,
+        usage=usage,
+        kind="quiz_event",
+    )
+
+    # Never send correct_index to the client before grading.
+    safe_questions = [
+        {
+            "question": q["question"],
+            "options": q["options"],
+        }
+        for q in questions
+    ]
+
+    return {
+        "quiz_token": quiz_token,
+        "course_title": course.get("title", ""),
+        "questions": safe_questions,
+    }
+
+
+@app.post("/api/quiz/submit")
+async def quiz_submit(
+    payload: QuizSubmitRequest,
+    background_tasks: BackgroundTasks,
+    current=Depends(get_current_user),
+):
+    # -------------------------------------------------------------- #
+    # 1. Retrieve and invalidate the active quiz
+    # -------------------------------------------------------------- #
+    quiz = _ACTIVE_QUIZZES.pop(
+        payload.quiz_token,
+        None,
+    )
+
+    if not quiz or quiz["student_id"] != current["user_id"]:
+        raise HTTPException(
+            status_code=404,
+            detail="Quiz not found or already submitted.",
+        )
+
+    # -------------------------------------------------------------- #
+    # 2. Get course information
+    # -------------------------------------------------------------- #
+    course = get_course(
+        quiz["course_id"]
+    )
+
+    course_title = (
+        course.get("title", "this course")
+        if course
+        else "this course"
+    )
+
+    # -------------------------------------------------------------- #
+    # 3. Grade the quiz
+    # -------------------------------------------------------------- #
+    correct, total, score, missed = grade_quiz(
+        quiz["questions"],
+        payload.answers,
+    )
+
+    # -------------------------------------------------------------- #
+    # 4. Generate improvement plan (diagnosis + steps + project +
+    #    concepts to look into), grounded in the course's own material
+    # -------------------------------------------------------------- #
+    plan = generate_improvement_plan(
+        course_title,
+        missed,
+        score,
+        course_material=course.get("material", "") if course else "",
+    )
+    analysis = plan.get("diagnosis", "")
+
+
+    # Runs after the response is sent — this is an extra Groq call every
+    # 10th quiz, no reason to make the student wait on it.
+    background_tasks.add_task(
+        refine_quiz_experience,
+        topic=course_title,
+        questions=quiz["questions"],
+        score=score,
+        missed=missed,
+    )
+
+    # A quiz submission is exactly the moment a new risk signal (a
+    # declining score, a low grade) can appear — check right away
+    # instead of waiting for a scheduled sweep.
+    background_tasks.add_task(_run_planner_background, current["user_id"])
+
+    # -------------------------------------------------------------- #
+    # 6. Persist final quiz result
+    # -------------------------------------------------------------- #
+    add_quiz_grade(
+        current["user_id"],
+        quiz["course_id"],
+        score,
+        correct,
+        total,
+        analysis=analysis,
+        improvement_plan=plan,
+    )
+
+    # -------------------------------------------------------------- #
+    # 7. Trace the quiz submission
+    # -------------------------------------------------------------- #
+    log_chat_trace(
+        user_id=current["user_id"],
+        user_role="Student",
+        query=f"[quiz submitted for {course_title}]",
+        response=analysis,
+        agent="quiz_agent",
+        sentiment=None,
+        usage={},
+        kind="quiz_event",
+    )
+
+    # -------------------------------------------------------------- #
+    # 8. Return result to frontend
+    # -------------------------------------------------------------- #
+    return {
+        "correct": correct,
+        "total": total,
+        "score": score,
+        "analysis": analysis,
+        "improvement_plan": plan,
+        "correct_answers": [
+            q["correct_index"]
+            for q in quiz["questions"]
+        ],
+    }
+
+# ------------------------------------------------------------------ #
+# Voice
+# ------------------------------------------------------------------ #
+@app.post("/api/voice/transcribe")
+async def voice_transcribe(
+    file: UploadFile = File(...),
+    current=Depends(get_current_user),
+):
+    audio_bytes = await file.read()
+
+    try:
+        text = transcribe_audio(
+            audio_bytes,
+            filename=file.filename or "audio.webm",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=str(e),
+        )
+
+    return {"text": text}
+
+# ------------------------------------------------------------------ #
+# Frontend (single-page dashboard + static assets)
+# ------------------------------------------------------------------ #
+app.mount(
+    "/static",
+    StaticFiles(
+        directory=FRONTEND_DIR / "static"
+    ),
+    name="static",
+)
 
 @app.get("/")
-async def serve_portal():
-    return FileResponse(os.path.join("frontend", "templates", "aou_html.html"))
+def index():
+    return FileResponse(
+        FRONTEND_DIR / "templates" / "portal.html"
+    )
 
-@app.get("/aou_admin.html")
-async def serve_admin():
-    return FileResponse(os.path.join("frontend", "templates", "aou_admin.html"))
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+# ------------------------------------------------------------------ #
+# Debug — Academic Self-Refining Strategy
+# ------------------------------------------------------------------ #
+@app.get("/api/debug/strategy")
+def debug_strategy():
+    from app.agents.academic_agent import (
+        academic_refiner,
+        academic_memory,
+    )
+
+    return {
+        "experiences_count": len(
+            academic_memory.get_all()
+        ),
+        "current_strategy": academic_refiner.get_strategy(),
+    }
